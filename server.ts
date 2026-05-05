@@ -4,6 +4,7 @@ import { createServer as createViteServer } from "vite";
 import dotenv from "dotenv";
 import admin from "firebase-admin";
 
+dotenv.config({ path: ".env.local" });
 dotenv.config();
 
 // Initialize Firebase Admin (uses environment variables automatically if set up)
