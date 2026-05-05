@@ -10,12 +10,14 @@ export interface Product {
   id?: string;
   name: string;
   description: string;
+  category?: string;
   price: number;
   imageUrl: string;
   availableSizes: string[];
   availableColors: string[];
   isActive: boolean;
   createdAt: any;
+  updatedAt?: any;
 }
 
 export interface Order {

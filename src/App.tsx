@@ -55,7 +55,9 @@ import {
   BarChart3,
   PieChart as PieChartIcon,
   TrendingUp,
-  AlertTriangle
+  AlertTriangle,
+  Moon,
+  Sun
 } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import { jsPDF } from 'jspdf';
@@ -102,8 +104,23 @@ const ADMIN_EMAILS = (import.meta.env.VITE_ADMIN_EMAILS || 'rehanalay9@gmail.com
   .map((email) => email.trim().toLowerCase())
   .filter(Boolean);
 
+const getAdminPermissionHelp = () => {
+  const currentEmail = auth.currentUser?.email || '(belum terbaca)';
+  const configuredAdmins = ADMIN_EMAILS.length ? ADMIN_EMAILS.join(', ') : '(belum diatur)';
+
+  return [
+    'akses admin ditolak oleh Firestore.',
+    '',
+    `Login sekarang: ${currentEmail}`,
+    `Admin yang diizinkan app: ${configuredAdmins}`,
+    '',
+    'Pastikan email login sama persis dengan rules Firebase, lalu publish rules terbaru di Console Firebase.'
+  ].join('\n');
+};
+
 const DEFAULT_SIZES = ['S', 'M', 'L', 'XL', 'XXL', 'XXXL'];
 const DEFAULT_COLORS = ['Hitam', 'Putih', 'Navy', 'Maroon'];
+const PRODUCT_CATEGORIES = ['Kaos', 'Hoodie', 'Totebag', 'Aksesoris', 'Bundle', 'Digital', 'Lainnya'];
 const MAX_PAYMENT_PROOF_STORED_CHARS = 850_000;
 const MAX_PRODUCT_IMAGE_STORED_CHARS = 650_000;
 
@@ -197,6 +214,11 @@ const compressProductImageToDataUrl = (file: File) => compressImageToDataUrl(fil
 });
 
 export default function App() {
+  const [themeMode, setThemeMode] = useState<'light' | 'dark'>(() => {
+    if (typeof window === 'undefined') return 'light';
+    const savedTheme = window.localStorage.getItem('komits-theme');
+    return savedTheme === 'dark' ? 'dark' : 'light';
+  });
   const [user, setUser] = useState<User | null>(null);
   const [isAdmin, setIsAdmin] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -217,6 +239,7 @@ export default function App() {
   const [waMessage, setWaMessage] = useState('');
   const [paymentProofFile, setPaymentProofFile] = useState<File | null>(null);
   const [submitStatus, setSubmitStatus] = useState('');
+  const [productMessage, setProductMessage] = useState('');
   const [productImageProcessing, setProductImageProcessing] = useState(false);
   const [selectedOrder, setSelectedOrder] = useState<Order | null>(null);
   const [activeTab, setActiveTab] = useState<'preorder' | 'history' | 'stats' | 'products'>('preorder');
@@ -226,10 +249,11 @@ export default function App() {
   const [productFormData, setProductFormData] = useState({
     name: '',
     description: '',
+    category: 'Lainnya',
     price: 0,
     imageUrl: '',
-    availableSizes: 'S,M,L,XL,XXL,XXXL',
-    availableColors: 'Hitam,Putih,Navy,Maroon',
+    availableSizes: 'Default',
+    availableColors: 'Default',
     isActive: true
   });
 
@@ -254,6 +278,32 @@ export default function App() {
   const productImageInputRef = useRef<HTMLInputElement>(null);
   const activeProducts = products.filter(p => p.isActive || isAdmin);
   const currentProduct = activeProducts.find(p => p.id === selectedProductId) || activeProducts[0];
+  const isDarkMode = themeMode === 'dark';
+
+  useEffect(() => {
+    window.localStorage.setItem('komits-theme', themeMode);
+    document.documentElement.classList.toggle('dark', isDarkMode);
+  }, [themeMode, isDarkMode]);
+
+  const toggleTheme = () => {
+    setThemeMode(prev => prev === 'dark' ? 'light' : 'dark');
+  };
+
+  useEffect(() => {
+    if (!currentProduct) return;
+    const sizes = currentProduct.availableSizes?.length ? currentProduct.availableSizes : DEFAULT_SIZES;
+    const colors = currentProduct.availableColors?.length ? currentProduct.availableColors : DEFAULT_COLORS;
+    setFormData(prev => {
+      const nextSize = sizes.includes(prev.size) ? prev.size : sizes[0];
+      const nextColor = colors.includes(prev.color) ? prev.color : colors[0];
+      if (nextSize === prev.size && nextColor === prev.color) return prev;
+      return { ...prev, size: nextSize, color: nextColor };
+    });
+  }, [
+    currentProduct?.id,
+    currentProduct?.availableSizes?.join('|'),
+    currentProduct?.availableColors?.join('|')
+  ]);
 
   useEffect(() => {
     const testConnection = async () => {
@@ -500,6 +550,24 @@ export default function App() {
     }
   };
 
+  const resetProductForm = () => {
+    setEditingProduct(null);
+    setProductMessage('');
+    setProductFormData({
+      name: '',
+      description: '',
+      category: 'Lainnya',
+      price: 0,
+      imageUrl: '',
+      availableSizes: 'Default',
+      availableColors: 'Default',
+      isActive: true
+    });
+    if (productImageInputRef.current) {
+      productImageInputRef.current.value = '';
+    }
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!user) return;
@@ -562,8 +630,8 @@ export default function App() {
         name: '',
         phone: '',
         address: '',
-        size: 'M',
-        color: 'Hitam',
+        size: selectedProduct.availableSizes?.[0] || DEFAULT_SIZES[0],
+        color: selectedProduct.availableColors?.[0] || DEFAULT_COLORS[0],
         quantity: 1,
         paymentProofUrl: ''
       });
@@ -623,7 +691,28 @@ export default function App() {
 
   const handleSubmitProduct = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!isAdmin) return;
+    if (!isAdmin) {
+      alert(`Produk belum bisa disimpan: ${getAdminPermissionHelp()}`);
+      return;
+    }
+    setProductMessage('');
+    const productName = productFormData.name.trim();
+    const productDescription = productFormData.description.trim();
+    const productCategory = productFormData.category.trim() || 'Lainnya';
+    const productPrice = Number(productFormData.price);
+
+    if (!productName) {
+      alert("Nama produk wajib diisi.");
+      return;
+    }
+    if (!productDescription) {
+      alert("Deskripsi produk wajib diisi.");
+      return;
+    }
+    if (!Number.isFinite(productPrice) || productPrice <= 0) {
+      alert("Harga produk wajib lebih dari 0.");
+      return;
+    }
     if (!productFormData.imageUrl) {
       alert("Silakan pilih gambar produk terlebih dahulu.");
       return;
@@ -633,40 +722,38 @@ export default function App() {
       const availableSizes = productFormData.availableSizes.split(',').map(s => s.trim()).filter(Boolean);
       const availableColors = productFormData.availableColors.split(',').map(c => c.trim()).filter(Boolean);
       if (!availableSizes.length || !availableColors.length) {
-        alert("Ukuran dan warna produk wajib diisi.");
+        alert("Varian dan opsi produk wajib diisi.");
         setSubmitting(false);
         return;
       }
 
       const data = {
         ...productFormData,
+        name: productName,
+        description: productDescription,
+        category: productCategory,
         availableSizes,
         availableColors,
-        price: Number(productFormData.price),
-        createdAt: serverTimestamp()
+        price: productPrice,
+        updatedAt: serverTimestamp()
       };
 
       if (editingProduct) {
         await updateDoc(doc(db, 'products', editingProduct.id!), data);
       } else {
-        await addDoc(collection(db, 'products'), data);
+        await addDoc(collection(db, 'products'), {
+          ...data,
+          createdAt: serverTimestamp()
+        });
       }
       setIsAddingProduct(false);
-      setEditingProduct(null);
-      setProductFormData({
-        name: '',
-        description: '',
-        price: 0,
-        imageUrl: '',
-        availableSizes: 'S,M,L,XL,XXL,XXXL',
-        availableColors: 'Hitam,Putih,Navy,Maroon',
-        isActive: true
-      });
-      if (productImageInputRef.current) {
-        productImageInputRef.current.value = '';
-      }
+      resetProductForm();
+      setProductMessage(editingProduct ? 'Produk berhasil diperbarui.' : 'Produk berhasil disimpan dan akan muncul di pilihan user jika statusnya aktif.');
     } catch (error) {
-      handleFirestoreError(error, OperationType.WRITE, 'products');
+      const message = handleFirestoreError(error, OperationType.WRITE, 'products');
+      const code = typeof error === 'object' && error && 'code' in error ? String((error as { code?: unknown }).code) : '';
+      const isPermissionError = code === 'permission-denied' || message.toLowerCase().includes('missing or insufficient permissions');
+      alert(`Produk belum bisa disimpan: ${isPermissionError ? getAdminPermissionHelp() : message}`);
     } finally {
       setSubmitting(false);
     }
@@ -750,8 +837,8 @@ export default function App() {
       Nama: o.name,
       Telepon: o.phone,
       Alamat: o.address,
-      Ukuran: o.size,
-      Warna: o.color,
+      Varian: o.size,
+      Opsi: o.color,
       Jumlah: o.quantity,
       HargaSatuan: getOrderUnitPrice(o),
       Total: getOrderTotal(o),
@@ -895,20 +982,28 @@ export default function App() {
 
   const { colorChartData, statusChartData, totalRevenue } = getAnalytics();
   const COLORS = ['#2563eb', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#ec4899'];
+  const chartTooltipStyle = {
+    backgroundColor: isDarkMode ? '#1f1f1f' : '#ffffff',
+    color: isDarkMode ? '#f5f1e8' : '#111827',
+    borderRadius: '16px',
+    border: isDarkMode ? '1px solid rgba(255,255,255,0.08)' : 'none',
+    boxShadow: isDarkMode ? '0 20px 25px -5px rgba(0,0,0,0.45)' : '0 20px 25px -5px rgba(0,0,0,0.1)',
+    padding: '12px'
+  };
   const showPreorderForm = Boolean(user && !isAdmin && activeTab === 'preorder');
   const showOrdersDashboard = Boolean(user && (activeTab === 'history' || (isAdmin && activeTab === 'preorder')));
   const showHeroBanner = !user || showPreorderForm;
 
   if (loading) {
     return (
-      <div className="flex items-center justify-center min-h-screen bg-[#F5F7FA]">
+      <div className={`theme-${themeMode} flex items-center justify-center min-h-screen bg-[#F5F7FA] transition-colors duration-300`}>
         <Loader2 className="w-8 h-8 animate-spin text-blue-600" />
       </div>
     );
   }
 
   return (
-    <div className="min-h-screen bg-[#F5F7FA] font-sans text-gray-900 pb-12">
+    <div className={`theme-${themeMode} min-h-screen bg-[#F5F7FA] font-sans text-gray-900 pb-12 transition-colors duration-300`}>
       {/* Header */}
       <header className="bg-white border-b border-gray-200 sticky top-0 z-50">
         <div className="max-w-4xl mx-auto px-4 h-16 flex items-center justify-between">
@@ -919,31 +1014,41 @@ export default function App() {
             <h1 className="font-bold text-lg tracking-tight">KOMITS 2025</h1>
           </div>
           
-          {user ? (
-            <div className="flex items-center gap-3">
-              <div className="hidden sm:block text-right">
-                <p className="text-xs font-medium text-gray-500">
-                  Welcome {isAdmin && <span className="bg-red-100 text-red-600 px-1.5 py-0.5 rounded text-[10px] ml-1 uppercase font-bold">Admin</span>}
-                </p>
-                <p className="text-sm font-semibold">{user.displayName}</p>
-              </div>
-              <button 
-                onClick={handleLogout}
-                className="p-2 hover:bg-red-50 text-red-600 rounded-full transition-colors"
-                title="Logout"
-              >
-                <LogOut className="w-5 h-5" />
-              </button>
-            </div>
-          ) : (
+          <div className="flex items-center gap-2 sm:gap-3">
             <button 
-              onClick={handleLogin}
-              className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-full text-sm font-semibold transition-all flex items-center gap-2"
+              onClick={toggleTheme}
+              className="theme-toggle h-10 w-10 rounded-full border border-gray-200 bg-white text-gray-600 hover:bg-gray-50 transition-colors flex items-center justify-center"
+              title={isDarkMode ? 'Mode terang' : 'Mode gelap'}
+              aria-label={isDarkMode ? 'Aktifkan mode terang' : 'Aktifkan mode gelap'}
             >
-              <UserIcon className="w-4 h-4" />
-              Login with Google
+              {isDarkMode ? <Sun className="w-4 h-4" /> : <Moon className="w-4 h-4" />}
             </button>
-          )}
+            {user ? (
+              <div className="flex items-center gap-3">
+                <div className="hidden sm:block text-right">
+                  <p className="text-xs font-medium text-gray-500">
+                    Welcome {isAdmin && <span className="bg-red-100 text-red-600 px-1.5 py-0.5 rounded text-[10px] ml-1 uppercase font-bold">Admin</span>}
+                  </p>
+                  <p className="text-sm font-semibold">{user.displayName}</p>
+                </div>
+                <button 
+                  onClick={handleLogout}
+                  className="p-2 hover:bg-red-50 text-red-600 rounded-full transition-colors"
+                  title="Logout"
+                >
+                  <LogOut className="w-5 h-5" />
+                </button>
+              </div>
+            ) : (
+              <button 
+                onClick={handleLogin}
+                className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-full text-sm font-semibold transition-all flex items-center gap-2"
+              >
+                <UserIcon className="w-4 h-4" />
+                Login with Google
+              </button>
+            )}
+          </div>
         </div>
       </header>
 
@@ -1002,18 +1107,67 @@ export default function App() {
           <motion.div 
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
-            className="bg-gradient-to-br from-blue-600 to-indigo-700 rounded-[2rem] p-6 sm:p-8 mb-8 text-white relative overflow-hidden"
+            className="bg-gradient-to-br from-blue-600 to-indigo-800 rounded-[2.5rem] p-8 sm:p-10 mb-10 text-white relative overflow-hidden shadow-xl shadow-blue-900/10"
           >
-            <div className="relative z-10">
-              <p className="text-blue-100 font-mono text-[10px] sm:text-xs uppercase tracking-widest mb-2">Exclusive Release</p>
-              <h2 className="text-2xl sm:text-4xl font-extrabold mb-3 leading-tight">KOMITS 2025<br />Pre Order System</h2>
-              <p className="text-blue-100 max-w-sm text-sm sm:text-base opacity-90 leading-relaxed">
-                Dapatkan kaos official KOMITS 2025 edisi terbatas. Pilih ukuran, warna favorit, dan miliki sekarang!
+            <div className="relative z-10 sm:max-w-md">
+              <motion.div 
+                initial={{ opacity: 0, x: -20 }}
+                animate={{ opacity: 1, x: 0 }}
+                transition={{ delay: 0.2 }}
+                className="bg-white/10 backdrop-blur-md border border-white/20 w-fit px-3 py-1 rounded-full mb-6"
+              >
+                <p className="text-white font-mono text-[10px] uppercase tracking-[0.2em] font-bold">Limited Anniversary Edition</p>
+              </motion.div>
+              <h2 className="text-3xl sm:text-5xl font-black mb-4 leading-tight tracking-tight">
+                KOMITS 2025<br />
+                <span className="text-blue-300">Official Store</span>
+              </h2>
+              <p className="text-blue-100 text-sm sm:text-lg opacity-90 leading-relaxed font-medium mb-8">
+                Selamat Datang di Official Komits 2025 Merchandise. Koleksi eksklusif untuk mendukung pergerakan sosial.
               </p>
+              
+              {!user && (
+                <button 
+                  onClick={handleLogin}
+                  className="bg-white text-blue-700 font-black px-8 py-4 rounded-2xl flex items-center gap-2 hover:bg-blue-50 transition-all active:scale-95 shadow-lg"
+                >
+                  <ShoppingBag className="w-5 h-5" />
+                  BELANJA SEKARANG
+                </button>
+              )}
             </div>
-            <div className="absolute top-0 right-0 w-48 h-48 sm:w-64 sm:h-64 bg-white/10 rounded-full blur-3xl -translate-y-1/2 translate-x-1/4" />
-            <div className="absolute bottom-0 right-4 sm:right-12 opacity-10">
-              <Shirt size={120} className="sm:w-[200px] sm:h-[200px]" />
+
+            {/* Merchandise Image Stack */}
+            <div className="absolute top-0 right-0 h-full w-full pointer-events-none overflow-hidden sm:block">
+              {/* Product 1: Black T-Shirt */}
+              <motion.div 
+                initial={{ opacity: 0, scale: 0.8, rotate: 10, x: 100 }}
+                animate={{ opacity: 0.6, scale: 1, rotate: -15, x: 0 }}
+                transition={{ duration: 1.2, ease: "easeOut" }}
+                className="absolute -right-12 top-1/2 -translate-y-1/2 w-64 h-64 sm:w-96 sm:h-96"
+              >
+                <img 
+                  src="https://images.unsplash.com/photo-1521572163474-6864f9cf17ab?auto=format&fit=crop&q=80&w=600" 
+                  alt="Merchandise Mockup 1" 
+                  className="w-full h-full object-contain filter drop-shadow-2xl"
+                  referrerPolicy="no-referrer"
+                />
+              </motion.div>
+
+              {/* Product 2: White Hoodie / Sweatshirt */}
+              <motion.div 
+                initial={{ opacity: 0, scale: 0.8, rotate: -20, x: 100 }}
+                animate={{ opacity: 0.4, scale: 0.9, rotate: 10, x: 40 }}
+                transition={{ duration: 1.5, ease: "easeOut", delay: 0.3 }}
+                className="absolute right-12 bottom-0 w-48 h-48 sm:w-80 sm:h-80"
+              >
+                <img 
+                  src="https://images.unsplash.com/photo-1556821840-3a63f95609a7?auto=format&fit=crop&q=80&w=600" 
+                  alt="Merchandise Mockup 2" 
+                  className="w-full h-full object-contain filter drop-shadow-2xl"
+                  referrerPolicy="no-referrer"
+                />
+              </motion.div>
             </div>
           </motion.div>
         )}
@@ -1059,17 +1213,17 @@ export default function App() {
                     <div className="bg-blue-100 p-1.5 rounded-lg">
                       <BarChart3 className="w-4 h-4 text-blue-600" />
                     </div>
-                    POPULARITAS WARNA
+                    POPULARITAS OPSI
                   </h4>
                   <div className="h-[250px] sm:h-[300px] w-full">
                     <ResponsiveContainer width="100%" height="100%">
                       <BarChart data={colorChartData}>
-                        <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#F3F4F6" />
-                        <XAxis dataKey="name" fontSize={10} stroke="#9CA3AF" axisLine={false} tickLine={false} />
+                        <CartesianGrid strokeDasharray="3 3" vertical={false} stroke={isDarkMode ? '#343434' : '#F3F4F6'} />
+                        <XAxis dataKey="name" fontSize={10} stroke={isDarkMode ? '#9b9386' : '#9CA3AF'} axisLine={false} tickLine={false} />
                         <YAxis hide />
                         <Tooltip 
-                          cursor={{ fill: '#F9FAFB', radius: 8 }}
-                          contentStyle={{ borderRadius: '16px', border: 'none', boxShadow: '0 20px 25px -5px rgba(0,0,0,0.1)', padding: '12px' }}
+                          cursor={{ fill: isDarkMode ? '#242424' : '#F9FAFB', radius: 8 }}
+                          contentStyle={chartTooltipStyle}
                           itemStyle={{ fontWeight: '800', fontSize: '12px' }}
                         />
                         <Bar 
@@ -1107,9 +1261,9 @@ export default function App() {
                           ))}
                         </Pie>
                         <Tooltip 
-                          contentStyle={{ borderRadius: '16px', border: 'none', boxShadow: '0 20px 25px -5px rgba(0,0,0,0.1)', padding: '12px' }}
+                          contentStyle={chartTooltipStyle}
                         />
-                        <Legend iconType="circle" wrapperStyle={{ paddingTop: '20px', fontSize: '11px', fontWeight: 'bold' }} />
+                        <Legend iconType="circle" wrapperStyle={{ paddingTop: '20px', fontSize: '11px', fontWeight: 'bold', color: isDarkMode ? '#d8d0c1' : '#374151' }} />
                       </PieChart>
                     </ResponsiveContainer>
                   </div>
@@ -1132,23 +1286,19 @@ export default function App() {
                 <button 
                   onClick={() => {
                     setIsAddingProduct(true);
-                    setEditingProduct(null);
-                    if (productImageInputRef.current) productImageInputRef.current.value = '';
-                    setProductFormData({
-                      name: '',
-                      description: '',
-                      price: 0,
-                      imageUrl: '',
-                      availableSizes: 'S,M,L,XL,XXL,XXXL',
-                      availableColors: 'Hitam,Putih,Navy,Maroon',
-                      isActive: true
-                    });
+                    resetProductForm();
                   }}
                   className="bg-blue-600 text-white px-4 py-2 rounded-xl text-xs font-bold hover:bg-blue-700 transition-colors"
                 >
                   Tambah Produk Baru
                 </button>
               </div>
+
+              {productMessage && (
+                <div className="mb-4 rounded-2xl border border-green-100 bg-green-50 px-4 py-3 text-sm font-bold text-green-700">
+                  {productMessage}
+                </div>
+              )}
 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 {products.length === 0 ? (
@@ -1168,9 +1318,11 @@ export default function App() {
                         )}
                       </div>
                       <div className="min-w-0">
-                      <h4 className="font-bold text-sm truncate">{product.name}</h4>
-                      <p className="text-xs text-gray-500">Rp {product.price.toLocaleString()}</p>
-                      <p className="text-[10px] text-gray-400 mt-1">{product.isActive ? 'Aktif' : 'Nonaktif'}</p>
+                        <h4 className="font-bold text-sm truncate">{product.name}</h4>
+                        <p className="text-xs text-gray-500">Rp {product.price.toLocaleString()}</p>
+                        <p className="text-[10px] text-gray-400 mt-1">
+                          {product.category || 'Lainnya'} • {product.isActive ? 'Aktif' : 'Nonaktif'}
+                        </p>
                       </div>
                     </div>
                     <div className="flex gap-2">
@@ -1182,10 +1334,11 @@ export default function App() {
                           setProductFormData({
                             name: product.name,
                             description: product.description,
+                            category: product.category || 'Lainnya',
                             price: product.price,
                             imageUrl: product.imageUrl,
-                            availableSizes: product.availableSizes.join(','),
-                            availableColors: product.availableColors.join(','),
+                            availableSizes: (product.availableSizes || ['Default']).join(','),
+                            availableColors: (product.availableColors || ['Default']).join(','),
                             isActive: product.isActive
                           });
                         }}
@@ -1207,7 +1360,7 @@ export default function App() {
 
               <AnimatePresence>
                 {isAddingProduct && (
-                  <div className="fixed inset-0 z-[110] flex items-center justify-center p-4">
+                  <div className="fixed inset-0 z-[110] flex items-center justify-center p-3 sm:p-4">
                     <motion.div 
                       initial={{ opacity: 0 }}
                       animate={{ opacity: 1 }}
@@ -1219,10 +1372,13 @@ export default function App() {
                       initial={{ opacity: 0, scale: 0.9, y: 20 }}
                       animate={{ opacity: 1, scale: 1, y: 0 }}
                       exit={{ opacity: 0, scale: 0.9, y: 20 }}
-                      className="relative bg-white w-full max-w-lg rounded-3xl overflow-hidden shadow-2xl p-6"
+                      className="relative bg-white w-full max-w-lg max-h-[88vh] rounded-3xl overflow-hidden shadow-2xl flex flex-col"
                     >
-                      <h3 className="font-bold text-xl mb-6">{editingProduct ? 'Edit Produk' : 'Tambah Produk'}</h3>
-                      <form onSubmit={handleSubmitProduct} className="space-y-4">
+                      <div className="shrink-0 border-b border-gray-100 px-6 py-5">
+                        <h3 className="font-bold text-xl">{editingProduct ? 'Edit Produk' : 'Tambah Produk'}</h3>
+                        <p className="text-xs font-medium text-gray-400 mt-1">Lengkapi data produk, scroll untuk melihat semua field.</p>
+                      </div>
+                      <form onSubmit={handleSubmitProduct} className="min-h-0 flex-1 overflow-y-auto px-6 py-5 space-y-4 custom-scrollbar">
                         <div className="grid grid-cols-2 gap-4">
                           <div className="space-y-1">
                             <label className="text-[10px] font-bold text-gray-400 uppercase">Nama Produk</label>
@@ -1243,6 +1399,18 @@ export default function App() {
                               onChange={e => setProductFormData({...productFormData, price: parseInt(e.target.value) || 0})}
                             />
                           </div>
+                        </div>
+                        <div className="space-y-1">
+                          <label className="text-[10px] font-bold text-gray-400 uppercase">Kategori Produk</label>
+                          <select
+                            className="w-full bg-gray-50 border border-gray-100 rounded-xl px-4 py-2 text-sm"
+                            value={productFormData.category}
+                            onChange={e => setProductFormData({...productFormData, category: e.target.value})}
+                          >
+                            {PRODUCT_CATEGORIES.map(category => (
+                              <option key={category} value={category}>{category}</option>
+                            ))}
+                          </select>
                         </div>
                         <div className="space-y-1">
                           <label className="text-[10px] font-bold text-gray-400 uppercase">Deskripsi</label>
@@ -1292,7 +1460,7 @@ export default function App() {
                         </div>
                         <div className="grid grid-cols-2 gap-4">
                           <div className="space-y-1">
-                            <label className="text-[10px] font-bold text-gray-400 uppercase">Ukuran (Pisahkan ,)</label>
+                            <label className="text-[10px] font-bold text-gray-400 uppercase">Varian / Ukuran (Pisahkan ,)</label>
                             <input 
                               className="w-full bg-gray-50 border border-gray-100 rounded-xl px-4 py-2 text-sm"
                               value={productFormData.availableSizes}
@@ -1300,7 +1468,7 @@ export default function App() {
                             />
                           </div>
                           <div className="space-y-1">
-                            <label className="text-[10px] font-bold text-gray-400 uppercase">Warna (Pisahkan ,)</label>
+                            <label className="text-[10px] font-bold text-gray-400 uppercase">Opsi / Warna (Pisahkan ,)</label>
                             <input 
                               className="w-full bg-gray-50 border border-gray-100 rounded-xl px-4 py-2 text-sm"
                               value={productFormData.availableColors}
@@ -1316,7 +1484,7 @@ export default function App() {
                           />
                           <label className="text-xs font-bold text-gray-600">Produk Aktif / Dijual</label>
                         </div>
-                        <div className="flex gap-3 pt-4">
+                        <div className="sticky bottom-0 -mx-6 mt-2 flex gap-3 border-t border-gray-100 bg-white/95 px-6 py-4 backdrop-blur">
                           <button 
                             type="button"
                             onClick={() => {
@@ -1406,13 +1574,13 @@ export default function App() {
                     <div key={product.id} className="bg-gray-50 p-4 rounded-2xl">
                       <h5 className="text-xs font-bold text-gray-500 mb-3 uppercase tracking-wider">{product.name}</h5>
                       <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-6 gap-4">
-                        {product.availableSizes.map(size => {
+                        {(product.availableSizes?.length ? product.availableSizes : DEFAULT_SIZES).map(size => {
                           const stockKey = `${product.id}_${size}`;
                           const used = stockUsed[stockKey] || 0;
                           const limit = stockLimits[stockKey] || 50;
                           return (
                             <div key={size} className={`p-3 rounded-xl border transition-all ${used >= limit ? 'bg-red-50 border-red-100' : 'bg-white border-gray-100'}`}>
-                              <p className="text-[10px] font-bold text-gray-400 mb-1">SIZE {size}</p>
+                              <p className="text-[10px] font-bold text-gray-400 mb-1">VARIAN {size}</p>
                               {editingStock ? (
                                 <input 
                                   type="number"
@@ -1589,6 +1757,7 @@ export default function App() {
                         <div className="min-w-0">
                           <h4 className="font-black text-gray-900 leading-tight">{currentProduct.name}</h4>
                           <p className="text-sm font-bold text-blue-600 mt-1">Rp {currentProduct.price.toLocaleString()}</p>
+                          <p className="text-[10px] font-black uppercase tracking-wider text-gray-400 mt-1">{currentProduct.category || 'Lainnya'}</p>
                           <p className="text-xs text-gray-500 mt-2 line-clamp-3">{currentProduct.description}</p>
                         </div>
                       </div>
@@ -1641,7 +1810,7 @@ export default function App() {
 
                       <div className="grid grid-cols-2 gap-4">
                         <div className="space-y-1">
-                          <label className="text-xs font-bold text-gray-500 uppercase tracking-wider ml-1">Ukuran</label>
+                          <label className="text-xs font-bold text-gray-500 uppercase tracking-wider ml-1">Varian / Ukuran</label>
                           <select 
                             className="w-full bg-gray-50 border border-gray-100 rounded-xl px-3 py-3 focus:ring-2 focus:ring-blue-600 focus:bg-white outline-none transition-all appearance-none"
                             value={formData.size}
@@ -1661,7 +1830,7 @@ export default function App() {
                           </select>
                         </div>
                         <div className="space-y-1">
-                        <label className="text-xs font-bold text-gray-500 uppercase tracking-wider ml-1">Warna</label>
+                        <label className="text-xs font-bold text-gray-500 uppercase tracking-wider ml-1">Opsi / Warna</label>
                         <select 
                           className="w-full bg-gray-50 border border-gray-100 rounded-xl px-3 py-3 focus:ring-2 focus:ring-blue-600 focus:bg-white outline-none transition-all appearance-none"
                           value={formData.color}
