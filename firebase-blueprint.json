@@ -1,5 +1,40 @@
 {
   "entities": {
+    "products": {
+      "title": "Product",
+      "description": "Details of products available for preorder.",
+      "type": "object",
+      "properties": {
+        "name": { "type": "string" },
+        "description": { "type": "string" },
+        "price": { "type": "integer" },
+        "imageUrl": { "type": "string" },
+        "availableSizes": { "type": "array" },
+        "availableColors": { "type": "array" },
+        "isActive": { "type": "boolean" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["name", "description", "isActive"]
+    },
+    "settings": {
+      "title": "Application Settings",
+      "description": "Global settings for the application including stock limits.",
+      "type": "object",
+      "properties": {
+        "stockLimits": {
+          "type": "object",
+          "properties": {
+            "S": { "type": "integer" },
+            "M": { "type": "integer" },
+            "L": { "type": "integer" },
+            "XL": { "type": "integer" },
+            "XXL": { "type": "integer" },
+            "XXXL": { "type": "integer" }
+          }
+        }
+      },
+      "required": ["stockLimits"]
+    },
     "Order": {
       "title": "Order",
       "description": "Preorder information for a custom t-shirt",
@@ -22,6 +57,14 @@
     }
   },
   "firestore": {
+    "/products/{productId}": {
+      "schema": "products",
+      "description": "Available products for sale."
+    },
+    "/settings/{settingsId}": {
+      "schema": "settings",
+      "description": "Global application settings."
+    },
     "/orders/{orderId}": {
       "schema": "Order",
       "description": "Collection of preorders"

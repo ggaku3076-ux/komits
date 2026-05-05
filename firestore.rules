@@ -14,6 +14,16 @@ service cloud.firestore {
       return isSignedIn() && request.auth.uid == userId;
     }
 
+    match /settings/{settingsId} {
+      allow read: if isSignedIn();
+      allow write: if isAdmin();
+    }
+
+    match /products/{productId} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+
     match /orders/{orderId} {
       allow create: if isSignedIn()
         && request.resource.data.userId == request.auth.uid;

@@ -8,20 +8,20 @@ dotenv.config({ path: ".env.local" });
 dotenv.config();
 
 const FIREBASE_PROJECT_ID = process.env.FIREBASE_PROJECT_ID || process.env.VITE_FIREBASE_PROJECT_ID || "komits-5bceb";
+const ADMIN_EMAILS = (process.env.ADMIN_EMAILS || process.env.VITE_ADMIN_EMAILS || "rehanalay9@gmail.com")
+  .split(",")
+  .map((email) => email.trim().toLowerCase())
+  .filter(Boolean);
 
 if (!admin.apps.length) {
   try {
     admin.initializeApp({ projectId: FIREBASE_PROJECT_ID });
-  } catch (error) {
+  } catch {
     console.warn("Firebase Admin failed to initialize. Check service account env vars.");
   }
 }
 
 const db = admin.apps.length ? admin.firestore() : null;
-const ADMIN_EMAILS = (process.env.ADMIN_EMAILS || process.env.VITE_ADMIN_EMAILS || "rehanalay9@gmail.com")
-  .split(",")
-  .map((email) => email.trim().toLowerCase())
-  .filter(Boolean);
 
 type WhatsAppOrder = {
   id?: string;
@@ -118,15 +118,15 @@ async function startServer() {
     }
 
     try {
-      const response = await fetch('https://api.fonnte.com/send', {
-        method: 'POST',
-        headers: { 'Authorization': apiKey },
+      const response = await fetch("https://api.fonnte.com/send", {
+        method: "POST",
+        headers: { Authorization: apiKey },
         body: new URLSearchParams({
           target: normalizedPhone,
-          message: message,
-          countryCode: '62',
-          connectOnly: 'true'
-        })
+          message,
+          countryCode: "62",
+          connectOnly: "true",
+        }),
       });
 
       const rawResult = await response.text();
@@ -137,29 +137,19 @@ async function startServer() {
         detail?: string;
         requestid?: number | string;
       } = {};
+
       try {
         fonnteResult = JSON.parse(rawResult);
       } catch {
         fonnteResult = { detail: rawResult };
       }
 
-      if (!response.ok) {
+      if (!response.ok || fonnteResult.status === false || fonnteResult.Status === false) {
         return {
           orderId: "unknown",
           phone: normalizedPhone,
           status: "failed",
-          reason: fonnteResult.reason || fonnteResult.detail || response.statusText,
-          detail: rawResult,
-          requestId: fonnteResult.requestid,
-        };
-      }
-
-      if (fonnteResult.status === false || fonnteResult.Status === false) {
-        return {
-          orderId: "unknown",
-          phone: normalizedPhone,
-          status: "failed",
-          reason: fonnteResult.reason || fonnteResult.detail || "Fonnte menolak request",
+          reason: fonnteResult.reason || fonnteResult.detail || response.statusText || "Fonnte menolak request",
           detail: rawResult,
           requestId: fonnteResult.requestid,
         };
@@ -175,15 +165,18 @@ async function startServer() {
       };
     } catch (error) {
       console.error("WA Send Error:", error);
-      return { orderId: "unknown", phone: normalizedPhone, status: "failed", reason: error instanceof Error ? error.message : String(error) };
+      return {
+        orderId: "unknown",
+        phone: normalizedPhone,
+        status: "failed",
+        reason: error instanceof Error ? error.message : String(error),
+      };
     }
   };
 
-  // API Route to sync to Google Sheet
   app.post("/api/sync-order", async (req, res) => {
-    /* ... existing code ... */
     const webhookUrl = process.env.GOOGLE_SHEET_WEBHOOK_URL;
-    
+
     if (!webhookUrl) {
       console.warn("GOOGLE_SHEET_WEBHOOK_URL is not set. Skipping sheet sync.");
       return res.status(200).json({ status: "skipped", reason: "no_webhook" });
@@ -192,9 +185,7 @@ async function startServer() {
     try {
       const response = await fetch(webhookUrl, {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify(req.body),
       });
 
@@ -209,7 +200,6 @@ async function startServer() {
     }
   });
 
-  // API Route for WA Status Update
   app.post("/api/notify-status", async (req, res) => {
     if (!(await requireAdmin(req, res))) return;
 
@@ -223,7 +213,7 @@ async function startServer() {
   app.post("/api/broadcast-wa", async (req, res) => {
     if (!(await requireAdmin(req, res))) return;
 
-    let orders = Array.isArray(req.body.orders) ? req.body.orders as WhatsAppOrder[] : [];
+    let orders = Array.isArray(req.body.orders) ? (req.body.orders as WhatsAppOrder[]) : [];
 
     if (!orders.length && db) {
       try {
@@ -256,7 +246,39 @@ async function startServer() {
     });
   });
 
-  // Background Task: Payment Reminder (Every 24 hours)
+  app.get("/api/order-status/:phone", async (req, res) => {
+    const { phone } = req.params;
+    if (!phone || !db) return res.status(400).json({ error: "Missing phone" });
+
+    try {
+      const snapshot = await db
+        .collection("orders")
+        .where("phone", "==", phone)
+        .orderBy("createdAt", "desc")
+        .limit(5)
+        .get();
+
+      const orders = snapshot.docs.map((doc) => {
+        const data = doc.data();
+        return {
+          id: doc.id.slice(-6).toUpperCase(),
+          name: `${String(data.name || "").split(" ")[0]}***`,
+          status: data.status,
+          productName: data.productName || "Kaos KOMITS 2025",
+          size: data.size,
+          color: data.color,
+          quantity: data.quantity,
+          createdAt: data.createdAt?.toDate().toISOString() || null,
+        };
+      });
+
+      res.json({ orders });
+    } catch (error) {
+      console.error("Status check error:", error);
+      res.status(500).json({ error: "Failed to check status" });
+    }
+  });
+
   const runReminders = async () => {
     if (!db) return;
     console.log("Checking for payment reminders...");
@@ -264,7 +286,8 @@ async function startServer() {
       const yesterday = new Date();
       yesterday.setHours(yesterday.getHours() - 24);
 
-      const snapshot = await db.collection("orders")
+      const snapshot = await db
+        .collection("orders")
         .where("status", "==", "pending")
         .where("paymentProofUrl", "==", "")
         .where("createdAt", "<=", admin.firestore.Timestamp.fromDate(yesterday))
@@ -281,10 +304,8 @@ async function startServer() {
     }
   };
 
-  // Run every 4 hours to check for 24h gaps
   setInterval(runReminders, 1000 * 60 * 60 * 4);
 
-  // Vite middleware for development
   if (process.env.NODE_ENV !== "production") {
     const vite = await createViteServer({
       server: { middlewareMode: true },
