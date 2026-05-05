@@ -7,6 +7,10 @@ type ApiResponse = {
   json: (body: unknown) => void;
 };
 
+export const config = {
+  runtime: "nodejs",
+};
+
 export default function handler(req: ApiRequest, res: ApiResponse) {
   if (req.method !== "GET") {
     return res.status(405).json({ error: "Method not allowed" });

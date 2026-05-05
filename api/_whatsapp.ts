@@ -54,7 +54,9 @@ const getTokenPayload = (token: string) => {
   try {
     const [, payload] = token.split(".");
     if (!payload) return null;
-    return JSON.parse(Buffer.from(payload, "base64url").toString("utf8")) as {
+    const normalized = payload.replace(/-/g, "+").replace(/_/g, "/");
+    const padding = "=".repeat((4 - (normalized.length % 4)) % 4);
+    return JSON.parse(Buffer.from(normalized + padding, "base64").toString("utf8")) as {
       aud?: string;
       email?: string;
     };

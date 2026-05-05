@@ -1,5 +1,9 @@
 import { buildStatusMessage, getBody, handleApiError, requireAdmin, sendWA, WhatsAppOrder, WhatsAppResult } from "./_whatsapp";
 
+export const config = {
+  runtime: "nodejs",
+};
+
 type ApiRequest = {
   method?: string;
   headers: Record<string, string | string[] | undefined>;
