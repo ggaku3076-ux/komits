@@ -1,10 +1,10 @@
 {
-  "projectId": "graceful-karma-249804",
-  "appId": "1:1026581139695:web:2e99f7258558323fb00b1a",
-  "apiKey": "AIzaSyCeLv3Fv-VQTnQgOORxl5AGbG3_yb5ctvA",
-  "authDomain": "graceful-karma-249804.firebaseapp.com",
-  "firestoreDatabaseId": "ai-studio-9918bc32-5def-4153-b1fb-d59b607750c3",
-  "storageBucket": "graceful-karma-249804.firebasestorage.app",
-  "messagingSenderId": "1026581139695",
-  "measurementId": ""
+  "projectId": "komits-5bceb",
+  "appId": "1:291231449612:web:61cc42439666926db52429",
+  "apiKey": "AIzaSyDsCeRM4fE0c-H7jba3eQrb7jTkf4HWkrM",
+  "authDomain": "komits-5bceb.firebaseapp.com",
+  "firestoreDatabaseId": "(default)",
+  "storageBucket": "komits-5bceb.firebasestorage.app",
+  "messagingSenderId": "291231449612",
+  "measurementId": "G-7DP9JGQMFQ"
 }
