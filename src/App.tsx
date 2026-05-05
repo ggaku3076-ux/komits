@@ -71,9 +71,9 @@ const handleFirestoreError = (error: unknown, operationType: OperationType, path
   return errInfo.error;
 };
 
-const ADMIN_EMAILS = (import.meta.env.VITE_ADMIN_EMAILS || 'ferdy.ap@gmail.com')
+const ADMIN_EMAILS = (import.meta.env.VITE_ADMIN_EMAILS || 'rehanalay9@gmail.com')
   .split(',')
-  .map((email) => email.trim())
+  .map((email) => email.trim().toLowerCase())
   .filter(Boolean);
 
 export default function App() {
@@ -115,7 +115,7 @@ export default function App() {
 
     return onAuthStateChanged(auth, (u) => {
       setUser(u);
-      setIsAdmin(u ? ADMIN_EMAILS.includes(u.email || '') : false);
+      setIsAdmin(u ? ADMIN_EMAILS.includes((u.email || '').toLowerCase()) : false);
       setLoading(false);
     });
   }, []);
