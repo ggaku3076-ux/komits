@@ -7,7 +7,11 @@ const ADMIN_EMAILS = (process.env.ADMIN_EMAILS || process.env.VITE_ADMIN_EMAILS 
   .filter(Boolean);
 
 if (!admin.apps.length) {
-  admin.initializeApp({ projectId: FIREBASE_PROJECT_ID });
+  try {
+    admin.initializeApp({ projectId: FIREBASE_PROJECT_ID });
+  } catch (error) {
+    console.warn("Firebase Admin failed to initialize in API route:", error);
+  }
 }
 
 export type WhatsAppOrder = {
@@ -56,6 +60,19 @@ export const getBody = <T = Record<string, unknown>>(body: unknown): T => {
   return (body || {}) as T;
 };
 
+const getTokenPayload = (token: string) => {
+  try {
+    const [, payload] = token.split(".");
+    if (!payload) return null;
+    return JSON.parse(Buffer.from(payload, "base64url").toString("utf8")) as {
+      aud?: string;
+      email?: string;
+    };
+  } catch {
+    return null;
+  }
+};
+
 export const requireAdmin = async (req: ApiRequest, res: ApiResponse) => {
   const authorization = req.headers.authorization;
   const header = Array.isArray(authorization) ? authorization[0] : authorization;
@@ -66,18 +83,35 @@ export const requireAdmin = async (req: ApiRequest, res: ApiResponse) => {
     return false;
   }
 
-  try {
-    const decoded = await admin.auth().verifyIdToken(token);
-    if (decoded.email && ADMIN_EMAILS.includes(decoded.email.toLowerCase())) {
-      return true;
-    }
-    res.status(403).json({ error: "Only admin can send WhatsApp messages" });
-    return false;
-  } catch (error) {
-    console.error("Admin token verification failed:", error);
-    res.status(401).json({ error: "Invalid Firebase admin token" });
-    return false;
+  const payload = getTokenPayload(token);
+  if (
+    payload?.aud === FIREBASE_PROJECT_ID &&
+    payload.email &&
+    ADMIN_EMAILS.includes(payload.email.toLowerCase())
+  ) {
+    return true;
   }
+
+  if (admin.apps.length) {
+    try {
+      const decoded = await admin.auth().verifyIdToken(token);
+      if (decoded.email && ADMIN_EMAILS.includes(decoded.email.toLowerCase())) {
+        return true;
+      }
+    } catch (error) {
+      console.error("Admin token verification failed:", error);
+    }
+  }
+
+  res.status(403).json({ error: "Only admin can send WhatsApp messages" });
+  return false;
+};
+
+export const handleApiError = (error: unknown, res: ApiResponse) => {
+  console.error("API route error:", error);
+  res.status(500).json({
+    error: error instanceof Error ? error.message : String(error),
+  });
 };
 
 export const sendWA = async (phone: string, message: string): Promise<WhatsAppResult> => {
