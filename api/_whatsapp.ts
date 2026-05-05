@@ -1,18 +1,8 @@
-import admin from "firebase-admin";
-
 const FIREBASE_PROJECT_ID = process.env.FIREBASE_PROJECT_ID || process.env.VITE_FIREBASE_PROJECT_ID || "komits-5bceb";
 const ADMIN_EMAILS = (process.env.ADMIN_EMAILS || process.env.VITE_ADMIN_EMAILS || "rehanalay9@gmail.com")
   .split(",")
   .map((email) => email.trim().toLowerCase())
   .filter(Boolean);
-
-if (!admin.apps.length) {
-  try {
-    admin.initializeApp({ projectId: FIREBASE_PROJECT_ID });
-  } catch (error) {
-    console.warn("Firebase Admin failed to initialize in API route:", error);
-  }
-}
 
 export type WhatsAppOrder = {
   id?: string;
@@ -90,17 +80,6 @@ export const requireAdmin = async (req: ApiRequest, res: ApiResponse) => {
     ADMIN_EMAILS.includes(payload.email.toLowerCase())
   ) {
     return true;
-  }
-
-  if (admin.apps.length) {
-    try {
-      const decoded = await admin.auth().verifyIdToken(token);
-      if (decoded.email && ADMIN_EMAILS.includes(decoded.email.toLowerCase())) {
-        return true;
-      }
-    } catch (error) {
-      console.error("Admin token verification failed:", error);
-    }
   }
 
   res.status(403).json({ error: "Only admin can send WhatsApp messages" });
