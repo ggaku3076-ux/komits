@@ -45,7 +45,8 @@ import {
   LogOut,
   ChevronRight,
   Info,
-  Shirt
+  Shirt,
+  Send
 } from 'lucide-react';
 import { db, auth } from './lib/firebase';
 import { Order, OrderStatus, OperationType } from './types';
@@ -85,6 +86,8 @@ export default function App() {
   const [success, setSuccess] = useState(false);
   const [submitMessage, setSubmitMessage] = useState('');
   const [ordersError, setOrdersError] = useState('');
+  const [waSending, setWaSending] = useState(false);
+  const [waMessage, setWaMessage] = useState('');
   const [selectedOrder, setSelectedOrder] = useState<Order | null>(null);
 
   // Form State
@@ -165,6 +168,86 @@ export default function App() {
       });
     } catch (error) {
       console.warn('Google Sheet sync failed:', error);
+    }
+  };
+
+  const getAdminAuthHeaders = async () => {
+    const token = await auth.currentUser?.getIdToken();
+    return token ? { Authorization: `Bearer ${token}` } : {};
+  };
+
+  const getWhatsAppResultMessage = (summary: { sent?: number; mocked?: number; skipped?: number; failed?: number }) => {
+    const delivered = (summary.sent || 0) + (summary.mocked || 0);
+    const mode = summary.mocked ? 'mode mock, belum benar-benar terkirim karena WHATSAPP_API_KEY belum diisi' : 'terkirim';
+    return `WhatsApp selesai: ${delivered} ${mode}, ${summary.skipped || 0} dilewati, ${summary.failed || 0} gagal.`;
+  };
+
+  const handleSendOrderWhatsApp = async (order: Order) => {
+    if (!isAdmin) return;
+    setWaSending(true);
+    setWaMessage('');
+    try {
+      const response = await fetch('/api/notify-status', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(await getAdminAuthHeaders()),
+        },
+        body: JSON.stringify({
+          orderId: order.id,
+          phone: order.phone,
+          name: order.name,
+          status: order.status,
+        }),
+      });
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.error || 'WhatsApp gagal dikirim');
+      setWaMessage(getWhatsAppResultMessage({
+        sent: result.status === 'sent' ? 1 : 0,
+        mocked: result.status === 'mocked' ? 1 : 0,
+        skipped: result.status === 'skipped' ? 1 : 0,
+        failed: result.status === 'failed' ? 1 : 0,
+      }));
+    } catch (error) {
+      setWaMessage(`WhatsApp gagal: ${error instanceof Error ? error.message : String(error)}`);
+    } finally {
+      setWaSending(false);
+    }
+  };
+
+  const handleBroadcastWhatsApp = async () => {
+    if (!isAdmin) return;
+    if (!orders.length) {
+      setWaMessage('Belum ada order untuk dikirim WhatsApp.');
+      return;
+    }
+    if (!confirm(`Kirim pesan WhatsApp ke ${orders.length} order? Nomor kosong/tidak valid akan dilewati.`)) return;
+
+    setWaSending(true);
+    setWaMessage('');
+    try {
+      const response = await fetch('/api/broadcast-wa', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(await getAdminAuthHeaders()),
+        },
+        body: JSON.stringify({
+          orders: orders.map((order) => ({
+            id: order.id,
+            phone: order.phone,
+            name: order.name,
+            status: order.status,
+          })),
+        }),
+      });
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.error || 'Broadcast WhatsApp gagal');
+      setWaMessage(getWhatsAppResultMessage(result));
+    } catch (error) {
+      setWaMessage(`Broadcast WhatsApp gagal: ${error instanceof Error ? error.message : String(error)}`);
+    } finally {
+      setWaSending(false);
     }
   };
 
@@ -523,20 +606,38 @@ export default function App() {
                   {isAdmin ? `Dashboard Admin (${orders.length})` : 'Pesanan Saya'}
                 </h3>
                 {isAdmin && (
-                  <div className="mb-4 grid grid-cols-3 gap-2">
-                    <div className="rounded-xl bg-orange-50 p-3 text-center">
-                      <p className="text-[10px] font-bold uppercase text-orange-500">Pending</p>
-                      <p className="text-lg font-black text-orange-700">{orders.filter(order => order.status === OrderStatus.PENDING).length}</p>
+                  <>
+                    <div className="mb-4 grid grid-cols-3 gap-2">
+                      <div className="rounded-xl bg-orange-50 p-3 text-center">
+                        <p className="text-[10px] font-bold uppercase text-orange-500">Pending</p>
+                        <p className="text-lg font-black text-orange-700">{orders.filter(order => order.status === OrderStatus.PENDING).length}</p>
+                      </div>
+                      <div className="rounded-xl bg-green-50 p-3 text-center">
+                        <p className="text-[10px] font-bold uppercase text-green-500">Verified</p>
+                        <p className="text-lg font-black text-green-700">{orders.filter(order => order.status === OrderStatus.VERIFIED).length}</p>
+                      </div>
+                      <div className="rounded-xl bg-blue-50 p-3 text-center">
+                        <p className="text-[10px] font-bold uppercase text-blue-500">Total</p>
+                        <p className="text-lg font-black text-blue-700">{orders.length}</p>
+                      </div>
                     </div>
-                    <div className="rounded-xl bg-green-50 p-3 text-center">
-                      <p className="text-[10px] font-bold uppercase text-green-500">Verified</p>
-                      <p className="text-lg font-black text-green-700">{orders.filter(order => order.status === OrderStatus.VERIFIED).length}</p>
+                    <button
+                      onClick={handleBroadcastWhatsApp}
+                      disabled={waSending || orders.length === 0}
+                      className="mb-3 w-full rounded-xl bg-green-600 px-4 py-3 text-sm font-bold text-white transition-colors hover:bg-green-700 disabled:bg-green-300 flex items-center justify-center gap-2"
+                    >
+                      {waSending ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
+                      Broadcast WA Semua Order
+                    </button>
+                    {waMessage && (
+                      <div className="mb-4 rounded-xl border border-green-100 bg-green-50 p-3 text-sm font-medium text-green-700">
+                        {waMessage}
+                      </div>
+                    )}
+                    <div className="mb-4 rounded-xl border border-gray-100 bg-gray-50 p-3 text-xs leading-relaxed text-gray-500">
+                      Pesan WA memakai nomor dari field No Telepon / WA. Jika API key Fonnte belum diisi, sistem berjalan dalam mode mock untuk testing.
                     </div>
-                    <div className="rounded-xl bg-blue-50 p-3 text-center">
-                      <p className="text-[10px] font-bold uppercase text-blue-500">Total</p>
-                      <p className="text-lg font-black text-blue-700">{orders.length}</p>
-                    </div>
-                  </div>
+                  </>
                 )}
 
                 {ordersError && (
@@ -676,6 +777,19 @@ export default function App() {
                         ))}
                       </div>
                       <div className="mt-4 pt-4 border-t border-gray-200">
+                        <button
+                          onClick={() => handleSendOrderWhatsApp(selectedOrder)}
+                          disabled={waSending || !selectedOrder.phone}
+                          className="mb-3 w-full py-2 rounded-xl text-xs font-bold text-green-700 hover:bg-green-50 transition-colors border border-green-100 flex items-center justify-center gap-2 disabled:text-green-300"
+                        >
+                          {waSending ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
+                          Kirim WA ke Pemesan
+                        </button>
+                        {waMessage && (
+                          <div className="mb-3 rounded-xl border border-green-100 bg-green-50 p-3 text-xs font-medium text-green-700">
+                            {waMessage}
+                          </div>
+                        )}
                         <button
                           onClick={() => handleDeleteOrder(selectedOrder.id!)}
                           className="w-full py-2 rounded-xl text-xs font-bold text-red-600 hover:bg-red-50 transition-colors border border-red-100"

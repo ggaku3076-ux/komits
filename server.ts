@@ -18,6 +18,38 @@ if (!admin.apps.length) {
 }
 
 const db = admin.apps.length ? admin.firestore() : null;
+const ADMIN_EMAILS = (process.env.ADMIN_EMAILS || process.env.VITE_ADMIN_EMAILS || "rehanalay9@gmail.com")
+  .split(",")
+  .map((email) => email.trim().toLowerCase())
+  .filter(Boolean);
+
+type WhatsAppOrder = {
+  id?: string;
+  phone?: string;
+  name?: string;
+  status?: string;
+};
+
+type WhatsAppResult = {
+  orderId: string;
+  phone: string;
+  status: "sent" | "mocked" | "skipped" | "failed";
+  reason?: string;
+};
+
+const normalizePhone = (phone: string) => {
+  const digits = String(phone || "").replace(/\D/g, "");
+  if (!digits) return "";
+  if (digits.startsWith("62")) return digits;
+  if (digits.startsWith("0")) return `62${digits.slice(1)}`;
+  return digits;
+};
+
+const buildStatusMessage = (order: WhatsAppOrder) => {
+  const orderCode = order.id ? order.id.slice(-6).toUpperCase() : "N/A";
+  const status = order.status || "pending";
+  return `Halo ${order.name || "Pelanggan"}!\n\nStatus pesanan KOMITS 2025 Anda (ID: ${orderCode}) saat ini: *${status.toUpperCase()}*.\n\nTerima kasih sudah melakukan preorder.`;
+};
 
 async function startServer() {
   const app = express();
@@ -25,26 +57,62 @@ async function startServer() {
 
   app.use(express.json());
 
-  const sendWA = async (phone: string, message: string) => {
+  const requireAdmin = async (req: express.Request, res: express.Response) => {
     const apiKey = process.env.WHATSAPP_API_KEY;
-    if (!apiKey) {
-      console.log(`[WA MOCK to ${phone}]: ${message}`);
-      return;
+    if (!apiKey) return true;
+
+    const token = req.headers.authorization?.replace(/^Bearer\s+/i, "");
+    if (!token) {
+      res.status(401).json({ error: "Missing Firebase admin token" });
+      return false;
     }
 
     try {
-      // Example using Fonnte (popular in ID) - Adjust for your provider
-      await fetch('https://api.fonnte.com/send', {
+      const decoded = await admin.auth().verifyIdToken(token);
+      if (decoded.email && ADMIN_EMAILS.includes(decoded.email.toLowerCase())) {
+        return true;
+      }
+      res.status(403).json({ error: "Only admin can send WhatsApp messages" });
+      return false;
+    } catch (error) {
+      console.error("Admin token verification failed:", error);
+      res.status(401).json({ error: "Invalid Firebase admin token" });
+      return false;
+    }
+  };
+
+  const sendWA = async (phone: string, message: string): Promise<WhatsAppResult> => {
+    const normalizedPhone = normalizePhone(phone);
+    if (!normalizedPhone) {
+      return { orderId: "unknown", phone, status: "skipped", reason: "Nomor WhatsApp kosong/tidak valid" };
+    }
+
+    const apiKey = process.env.WHATSAPP_API_KEY;
+    if (!apiKey) {
+      console.log(`[WA MOCK to ${normalizedPhone}]: ${message}`);
+      return { orderId: "unknown", phone: normalizedPhone, status: "mocked" };
+    }
+
+    try {
+      const response = await fetch('https://api.fonnte.com/send', {
         method: 'POST',
         headers: { 'Authorization': apiKey },
         body: new URLSearchParams({
-          target: phone,
+          target: normalizedPhone,
           message: message,
-          countryCode: '62' // default for ID
+          countryCode: '62'
         })
       });
+
+      if (!response.ok) {
+        const detail = await response.text();
+        return { orderId: "unknown", phone: normalizedPhone, status: "failed", reason: detail || response.statusText };
+      }
+
+      return { orderId: "unknown", phone: normalizedPhone, status: "sent" };
     } catch (error) {
       console.error("WA Send Error:", error);
+      return { orderId: "unknown", phone: normalizedPhone, status: "failed", reason: error instanceof Error ? error.message : String(error) };
     }
   };
 
@@ -80,13 +148,49 @@ async function startServer() {
 
   // API Route for WA Status Update
   app.post("/api/notify-status", async (req, res) => {
+    if (!(await requireAdmin(req, res))) return;
+
     const { phone, name, status, orderId } = req.body;
     if (!phone || !status) return res.status(400).json({ error: "Missing phone or status" });
 
-    const message = `Halo ${name || 'Pelanggan'}!\n\nStatus pesanan KOMITS 2025 Anda (ID: ${orderId || 'N/A'}) telah diperbarui menjadi: *${status.toUpperCase()}*.\n\nTerima kasih atas pesanan Anda!`;
-    
-    await sendWA(phone, message);
-    res.json({ status: "success" });
+    const result = await sendWA(phone, buildStatusMessage({ id: orderId, phone, name, status }));
+    res.json({ ...result, orderId: orderId || "unknown" });
+  });
+
+  app.post("/api/broadcast-wa", async (req, res) => {
+    if (!(await requireAdmin(req, res))) return;
+
+    let orders = Array.isArray(req.body.orders) ? req.body.orders as WhatsAppOrder[] : [];
+
+    if (!orders.length && db) {
+      try {
+        const snapshot = await db.collection("orders").get();
+        orders = snapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() })) as WhatsAppOrder[];
+      } catch (error) {
+        console.error("Failed to read orders for WA broadcast:", error);
+        return res.status(500).json({ error: "Failed to read orders for WA broadcast" });
+      }
+    }
+
+    if (!orders.length) {
+      return res.status(400).json({ error: "Tidak ada data order untuk dikirim WhatsApp" });
+    }
+
+    const results: WhatsAppResult[] = [];
+    for (const order of orders) {
+      const result = await sendWA(order.phone || "", req.body.message || buildStatusMessage(order));
+      results.push({ ...result, orderId: order.id || "unknown" });
+    }
+
+    res.json({
+      status: "done",
+      total: results.length,
+      sent: results.filter((result) => result.status === "sent").length,
+      mocked: results.filter((result) => result.status === "mocked").length,
+      skipped: results.filter((result) => result.status === "skipped").length,
+      failed: results.filter((result) => result.status === "failed").length,
+      results,
+    });
   });
 
   // Background Task: Payment Reminder (Every 24 hours)
