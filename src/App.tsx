@@ -1011,7 +1011,7 @@ export default function App() {
             <div className="bg-blue-600 p-2 rounded-lg">
               <ShoppingBag className="w-5 h-5 text-white" />
             </div>
-            <h1 className="font-bold text-lg tracking-tight">KOMITS 2025</h1>
+            <h1 className="font-bold text-lg tracking-tight">KOMITS Store</h1>
           </div>
           
           <div className="flex items-center gap-2 sm:gap-3">
