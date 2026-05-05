@@ -176,10 +176,12 @@ export default function App() {
     return token ? { Authorization: `Bearer ${token}` } : {};
   };
 
-  const getWhatsAppResultMessage = (summary: { sent?: number; mocked?: number; skipped?: number; failed?: number }) => {
+  const getWhatsAppResultMessage = (summary: { sent?: number; mocked?: number; skipped?: number; failed?: number; reason?: string; requestId?: string | number }) => {
     const delivered = (summary.sent || 0) + (summary.mocked || 0);
     const mode = summary.mocked ? 'mode mock, belum benar-benar terkirim karena WHATSAPP_API_KEY belum diisi' : 'terkirim';
-    return `WhatsApp selesai: ${delivered} ${mode}, ${summary.skipped || 0} dilewati, ${summary.failed || 0} gagal.`;
+    const detail = summary.reason ? ` Info: ${summary.reason}.` : '';
+    const request = summary.requestId ? ` Request ID: ${summary.requestId}.` : '';
+    return `WhatsApp selesai: ${delivered} ${mode}, ${summary.skipped || 0} dilewati, ${summary.failed || 0} gagal.${detail}${request}`;
   };
 
   const handleSendOrderWhatsApp = async (order: Order) => {
@@ -207,6 +209,8 @@ export default function App() {
         mocked: result.status === 'mocked' ? 1 : 0,
         skipped: result.status === 'skipped' ? 1 : 0,
         failed: result.status === 'failed' ? 1 : 0,
+        reason: result.reason,
+        requestId: result.requestId,
       }));
     } catch (error) {
       setWaMessage(`WhatsApp gagal: ${error instanceof Error ? error.message : String(error)}`);

@@ -35,6 +35,8 @@ type WhatsAppResult = {
   phone: string;
   status: "sent" | "mocked" | "skipped" | "failed";
   reason?: string;
+  detail?: string;
+  requestId?: number | string;
 };
 
 const normalizePhone = (phone: string) => {
@@ -122,16 +124,55 @@ async function startServer() {
         body: new URLSearchParams({
           target: normalizedPhone,
           message: message,
-          countryCode: '62'
+          countryCode: '62',
+          connectOnly: 'true'
         })
       });
 
-      if (!response.ok) {
-        const detail = await response.text();
-        return { orderId: "unknown", phone: normalizedPhone, status: "failed", reason: detail || response.statusText };
+      const rawResult = await response.text();
+      let fonnteResult: {
+        status?: boolean;
+        Status?: boolean;
+        reason?: string;
+        detail?: string;
+        requestid?: number | string;
+      } = {};
+      try {
+        fonnteResult = JSON.parse(rawResult);
+      } catch {
+        fonnteResult = { detail: rawResult };
       }
 
-      return { orderId: "unknown", phone: normalizedPhone, status: "sent" };
+      if (!response.ok) {
+        return {
+          orderId: "unknown",
+          phone: normalizedPhone,
+          status: "failed",
+          reason: fonnteResult.reason || fonnteResult.detail || response.statusText,
+          detail: rawResult,
+          requestId: fonnteResult.requestid,
+        };
+      }
+
+      if (fonnteResult.status === false || fonnteResult.Status === false) {
+        return {
+          orderId: "unknown",
+          phone: normalizedPhone,
+          status: "failed",
+          reason: fonnteResult.reason || fonnteResult.detail || "Fonnte menolak request",
+          detail: rawResult,
+          requestId: fonnteResult.requestid,
+        };
+      }
+
+      return {
+        orderId: "unknown",
+        phone: normalizedPhone,
+        status: "sent",
+        reason: fonnteResult.detail || "Pesan masuk antrean Fonnte",
+        detail: rawResult,
+        requestId: fonnteResult.requestid,
+      };
     } catch (error) {
       console.error("WA Send Error:", error);
       return { orderId: "unknown", phone: normalizedPhone, status: "failed", reason: error instanceof Error ? error.message : String(error) };
