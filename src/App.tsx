@@ -14,7 +14,6 @@ import {
   AnimatePresence 
 } from 'motion/react';
 import { 
-  getDocs, 
   collection, 
   addDoc, 
   query, 
@@ -69,10 +68,13 @@ const handleFirestoreError = (error: unknown, operationType: OperationType, path
     path
   };
   console.error('Firestore Error: ', JSON.stringify(errInfo));
-  throw new Error(JSON.stringify(errInfo));
+  return errInfo.error;
 };
 
-const ADMIN_EMAILS = ['ferdy.ap@gmail.com'];
+const ADMIN_EMAILS = (import.meta.env.VITE_ADMIN_EMAILS || 'ferdy.ap@gmail.com')
+  .split(',')
+  .map((email) => email.trim())
+  .filter(Boolean);
 
 export default function App() {
   const [user, setUser] = useState<User | null>(null);
@@ -81,6 +83,8 @@ export default function App() {
   const [orders, setOrders] = useState<Order[]>([]);
   const [submitting, setSubmitting] = useState(false);
   const [success, setSuccess] = useState(false);
+  const [submitMessage, setSubmitMessage] = useState('');
+  const [ordersError, setOrdersError] = useState('');
   const [selectedOrder, setSelectedOrder] = useState<Order | null>(null);
 
   // Form State
@@ -103,7 +107,7 @@ export default function App() {
       } catch (error) {
         if (error instanceof Error && (error.message.includes('the client is offline') || error.message.includes('unavailable'))) {
           console.error("Firestore connectivity issue:", error);
-          alert("Gagal terhubung ke database. Pastikan Firestore sudah diaktifkan di Console Firebase: https://console.firebase.google.com/project/graceful-karma-249804/firestore/databases/ai-studio-9918bc32-5def-4153-b1fb-d59b607750c3/data");
+          alert(`Gagal terhubung ke database. Pastikan Firestore sudah diaktifkan di Console Firebase untuk project ${import.meta.env.VITE_FIREBASE_PROJECT_ID || 'Firebase'} dan database ${(import.meta.env.VITE_FIRESTORE_DATABASE_ID || '(default)')}.`);
         }
       }
     };
@@ -119,29 +123,35 @@ export default function App() {
   useEffect(() => {
     if (!user) {
       setOrders([]);
+      setOrdersError('');
       return;
     }
 
-    const q = isAdmin 
+    const q = isAdmin
       ? query(collection(db, 'orders'), orderBy('createdAt', 'desc'))
-      : query(
-        collection(db, 'orders'),
-        where('userId', '==', user.uid),
-        orderBy('createdAt', 'desc')
-      );
+      : query(collection(db, 'orders'), where('userId', '==', user.uid));
 
     const unsubscribe = onSnapshot(q, (snapshot) => {
       const ordersData = snapshot.docs.map(doc => ({
         id: doc.id,
         ...doc.data()
       })) as Order[];
+      if (!isAdmin) {
+        ordersData.sort((a, b) => {
+          const left = a.createdAt?.toMillis?.() || 0;
+          const right = b.createdAt?.toMillis?.() || 0;
+          return right - left;
+        });
+      }
       setOrders(ordersData);
+      setOrdersError('');
     }, (error) => {
-      handleFirestoreError(error, OperationType.GET, 'orders');
+      const message = handleFirestoreError(error, OperationType.GET, 'orders');
+      setOrdersError(`Data pesanan belum bisa dibaca: ${message}`);
     });
 
     return unsubscribe;
-  }, [user]);
+  }, [user, isAdmin]);
 
   const syncToSheet = async (orderData: Partial<Order> & { id?: string }) => {
     try {
@@ -164,6 +174,8 @@ export default function App() {
       await signInWithPopup(auth, provider);
     } catch (error) {
       console.error('Login error:', error);
+      const firebaseError = error as { code?: string; message?: string };
+      alert(`Login Google gagal: ${firebaseError.code || firebaseError.message || 'unknown_error'}`);
     }
   };
 
@@ -198,6 +210,8 @@ export default function App() {
     try {
       const orderData = {
         userId: user.uid,
+        customerEmail: user.email,
+        customerName: user.displayName,
         ...formData,
         status: OrderStatus.PENDING,
         createdAt: serverTimestamp(),
@@ -210,6 +224,7 @@ export default function App() {
       syncToSheet({ id: docRef.id, ...orderData });
 
       setSuccess(true);
+      setSubmitMessage('Terimakasih sudah mengirim preorder. Data sudah masuk ke dashboard admin.');
       setFormData({
         name: '',
         phone: '',
@@ -219,9 +234,10 @@ export default function App() {
         quantity: 1,
         paymentProofUrl: ''
       });
-      setTimeout(() => setSuccess(false), 5000);
+      setTimeout(() => setSuccess(false), 7000);
     } catch (error) {
-      handleFirestoreError(error, OperationType.CREATE, 'orders');
+      const message = handleFirestoreError(error, OperationType.CREATE, 'orders');
+      alert(`Preorder belum terkirim: ${message}`);
     } finally {
       setSubmitting(false);
     }
@@ -245,7 +261,8 @@ export default function App() {
         if (order) syncToSheet({ ...order, status: newStatus });
       }
     } catch (error) {
-      handleFirestoreError(error, OperationType.UPDATE, `orders/${orderId}`);
+      const message = handleFirestoreError(error, OperationType.UPDATE, `orders/${orderId}`);
+      alert(`Status belum bisa diubah: ${message}`);
     }
   };
 
@@ -256,7 +273,8 @@ export default function App() {
       await deleteDoc(doc(db, 'orders', orderId));
       setSelectedOrder(null);
     } catch (error) {
-      handleFirestoreError(error, OperationType.DELETE, `orders/${orderId}`);
+      const message = handleFirestoreError(error, OperationType.DELETE, `orders/${orderId}`);
+      alert(`Pesanan belum bisa dihapus: ${message}`);
     }
   };
 
@@ -358,6 +376,9 @@ export default function App() {
                   <ClipboardList className="w-5 h-5 text-blue-600" />
                   Form Preorder
                 </h3>
+                <div className="mb-5 rounded-2xl border border-blue-100 bg-blue-50 px-4 py-3 text-sm text-blue-800">
+                  Setelah dikirim, data tersimpan di database dan langsung tampil di dashboard admin.
+                </div>
 
                 <form onSubmit={handleSubmit} className="space-y-4">
                   <div className="space-y-1">
@@ -482,7 +503,7 @@ export default function App() {
                         exit={{ opacity: 0, scale: 0.9 }}
                         className="bg-green-50 text-green-700 p-4 rounded-xl text-center text-sm font-medium border border-green-100"
                       >
-                        Pesanan Anda berhasil dikirim!
+                        {submitMessage}
                       </motion.div>
                     )}
                   </AnimatePresence>
@@ -499,8 +520,30 @@ export default function App() {
               <div className="bg-white border border-gray-200 rounded-3xl p-6 shadow-sm overflow-hidden">
                 <h3 className="text-lg font-bold mb-6 flex items-center gap-2">
                   <CheckCircle2 className="w-5 h-5 text-blue-600" />
-                  {isAdmin ? 'Semua Pesanan (Admin)' : 'Pesanan Saya'}
+                  {isAdmin ? `Dashboard Admin (${orders.length})` : 'Pesanan Saya'}
                 </h3>
+                {isAdmin && (
+                  <div className="mb-4 grid grid-cols-3 gap-2">
+                    <div className="rounded-xl bg-orange-50 p-3 text-center">
+                      <p className="text-[10px] font-bold uppercase text-orange-500">Pending</p>
+                      <p className="text-lg font-black text-orange-700">{orders.filter(order => order.status === OrderStatus.PENDING).length}</p>
+                    </div>
+                    <div className="rounded-xl bg-green-50 p-3 text-center">
+                      <p className="text-[10px] font-bold uppercase text-green-500">Verified</p>
+                      <p className="text-lg font-black text-green-700">{orders.filter(order => order.status === OrderStatus.VERIFIED).length}</p>
+                    </div>
+                    <div className="rounded-xl bg-blue-50 p-3 text-center">
+                      <p className="text-[10px] font-bold uppercase text-blue-500">Total</p>
+                      <p className="text-lg font-black text-blue-700">{orders.length}</p>
+                    </div>
+                  </div>
+                )}
+
+                {ordersError && (
+                  <div className="mb-4 rounded-xl border border-red-100 bg-red-50 p-3 text-sm font-medium text-red-700">
+                    {ordersError}
+                  </div>
+                )}
 
                 <div className="space-y-4 max-h-[600px] overflow-y-auto pr-2 custom-scrollbar">
                   {orders.length === 0 ? (
@@ -521,6 +564,7 @@ export default function App() {
                           <div>
                             <p className="text-xs font-bold text-gray-400 uppercase tracking-wider">Order ID: {order.id?.slice(-6).toUpperCase()}</p>
                             <h4 className="font-bold text-gray-800">{order.size} - {order.color}</h4>
+                            {isAdmin && <p className="text-xs text-gray-500">{order.customerEmail || order.name}</p>}
                           </div>
                           <span className={`text-[10px] uppercase font-bold px-2 py-1 rounded-lg flex items-center gap-1 ${
                             order.status === OrderStatus.PENDING ? 'bg-orange-100 text-orange-600' :
@@ -537,8 +581,8 @@ export default function App() {
                             <p className="text-sm font-bold text-gray-600">{order.quantity} pcs</p>
                           </div>
                           <div className="bg-white/50 p-2 rounded-lg">
-                            <p className="text-[10px] text-gray-400 uppercase font-bold">Estimasi</p>
-                            <p className="text-sm font-bold text-gray-600">Pending</p>
+                            <p className="text-[10px] text-gray-400 uppercase font-bold">Pemesan</p>
+                            <p className="text-sm font-bold text-gray-600 truncate">{order.name}</p>
                           </div>
                         </div>
                         <div className="flex items-center gap-2 text-xs text-gray-400">
@@ -666,6 +710,9 @@ export default function App() {
                       <div>
                         <p className="text-xs font-bold text-gray-400">Penerima</p>
                         <p className="text-sm font-medium">{selectedOrder.name}</p>
+                        {isAdmin && selectedOrder.customerEmail && (
+                          <p className="text-xs text-gray-500">{selectedOrder.customerEmail}</p>
+                        )}
                       </div>
                     </div>
                     <div className="flex gap-3">
@@ -704,4 +751,3 @@ export default function App() {
     </div>
   );
 }
-

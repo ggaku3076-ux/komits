@@ -2,79 +2,36 @@ rules_version = '2';
 
 service cloud.firestore {
   match /databases/{database}/documents {
-    // Default deny
-    match /{document=**} {
-      allow read, write: if false;
-    }
-
-    // Reuseable helpers
     function isSignedIn() {
       return request.auth != null;
     }
 
     function isAdmin() {
-      return isSignedIn() && (
-        request.auth.token.email == 'ferdy.ap@gmail.com' ||
-        exists(/databases/$(database)/documents/admins/$(request.auth.uid))
-      );
+      return isSignedIn() && request.auth.token.email == 'rehanalay9@gmail.com';
     }
 
     function isOwner(userId) {
       return isSignedIn() && request.auth.uid == userId;
     }
 
-    function isValidId(id) {
-      return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
-    }
-
-    function incoming() {
-      return request.resource.data;
-    }
-
-    function existing() {
-      return resource.data;
-    }
-
-    function isValidOrder(data) {
-      return data.size() >= 10 && data.size() <= 15
-        && data.userId == request.auth.uid
-        && data.name is string && data.name.size() > 0 && data.name.size() <= 100
-        && data.phone is string && data.phone.size() >= 10 && data.phone.size() <= 20
-        && data.address is string && data.address.size() > 0 && data.address.size() <= 500
-        && data.size in ['S', 'M', 'L', 'XL', 'XXL', 'XXXL']
-        && data.color is string && data.color.size() > 0 && data.color.size() <= 50
-        && data.quantity is int && data.quantity > 0 && data.quantity <= 100
-        && data.paymentProofUrl is string && data.paymentProofUrl.size() > 0
-        && data.status in ['pending', 'verified', 'processing', 'shipped', 'completed']
-        && data.createdAt == request.time
-        && data.updatedAt == request.time;
-    }
-
     match /orders/{orderId} {
-      allow get: if isOwner(existing().userId) || isAdmin();
-      allow list: if (isSignedIn() && resource.data.userId == request.auth.uid) || isAdmin();
-      
-      allow create: if isSignedIn() 
-        && isValidId(orderId)
-        && isValidOrder(incoming());
-        
-      allow update: if (
-        isOwner(existing().userId)
-        && isValidOrder(incoming())
-        && incoming().userId == existing().userId
-        && incoming().createdAt == existing().createdAt
-        && (
-          // Allow users to update their own address/phone if still pending
-          (existing().status == 'pending' && incoming().diff(existing()).affectedKeys().hasOnly(['name', 'phone', 'address', 'size', 'color', 'quantity', 'paymentProofUrl', 'updatedAt']))
-        )
-      ) || (
-        isAdmin()
-        && incoming().status in ['pending', 'verified', 'processing', 'shipped', 'completed']
-        && incoming().updatedAt == request.time
-        && incoming().diff(existing()).affectedKeys().hasOnly(['status', 'updatedAt'])
+      allow create: if isSignedIn()
+        && request.resource.data.userId == request.auth.uid;
+
+      allow get: if isAdmin() || isOwner(resource.data.userId);
+      allow list: if isSignedIn();
+
+      allow update: if isAdmin() || (
+        isOwner(resource.data.userId)
+        && resource.data.status == 'pending'
+        && request.resource.data.userId == resource.data.userId
       );
-        
-      allow delete: if isAdmin(); // Only admins can delete orders if necessary
+
+      allow delete: if isAdmin();
+    }
+
+    match /{document=**} {
+      allow read, write: if false;
     }
   }
 }
