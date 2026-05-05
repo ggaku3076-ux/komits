@@ -25,6 +25,8 @@ export interface Order {
   customerName: string | null;
   productId: string;
   productName?: string;
+  unitPrice?: number;
+  totalPrice?: number;
   name: string;
   phone: string;
   address: string;

@@ -102,30 +102,31 @@ const ADMIN_EMAILS = (import.meta.env.VITE_ADMIN_EMAILS || 'rehanalay9@gmail.com
   .map((email) => email.trim().toLowerCase())
   .filter(Boolean);
 
-const DEFAULT_PRODUCT: Product = {
-  id: 'default-komits-2025-shirt',
-  name: 'Kaos KOMITS 2025',
-  description: 'Kaos official KOMITS 2025 edisi preorder.',
-  price: 100000,
-  imageUrl: '',
-  availableSizes: ['S', 'M', 'L', 'XL', 'XXL', 'XXXL'],
-  availableColors: ['Hitam', 'Putih', 'Navy', 'Maroon'],
-  isActive: true,
-  createdAt: null,
-};
-
+const DEFAULT_SIZES = ['S', 'M', 'L', 'XL', 'XXL', 'XXXL'];
+const DEFAULT_COLORS = ['Hitam', 'Putih', 'Navy', 'Maroon'];
 const MAX_PAYMENT_PROOF_STORED_CHARS = 850_000;
+const MAX_PRODUCT_IMAGE_STORED_CHARS = 650_000;
 
-const compressPaymentProofToDataUrl = (file: File) => {
+const compressImageToDataUrl = (
+  file: File,
+  options: {
+    maxStoredChars: number;
+    initialMaxDimension: number;
+    minMaxDimension: number;
+    largeFileQuality: number;
+    normalQuality: number;
+    tooLargeMessage: string;
+  }
+) => {
   if (!file.type.startsWith('image/')) {
-    return Promise.reject(new Error('File bukti pembayaran harus berupa gambar JPG, PNG, atau format gambar lain yang didukung browser.'));
+    return Promise.reject(new Error('File harus berupa gambar JPG, PNG, atau format gambar lain yang didukung browser.'));
   }
 
   return new Promise<string>((resolve, reject) => {
     const image = new Image();
     const objectUrl = URL.createObjectURL(file);
-    let maxDimension = 1600;
-    let quality = file.size > 5 * 1024 * 1024 ? 0.72 : 0.82;
+    let maxDimension = options.initialMaxDimension;
+    let quality = file.size > 5 * 1024 * 1024 ? options.largeFileQuality : options.normalQuality;
 
     const renderCompressedImage = () => {
       const scale = Math.min(1, maxDimension / Math.max(image.width, image.height));
@@ -142,7 +143,7 @@ const compressPaymentProofToDataUrl = (file: File) => {
       context.drawImage(image, 0, 0, canvas.width, canvas.height);
       const dataUrl = canvas.toDataURL('image/jpeg', quality);
 
-      if (dataUrl.length <= MAX_PAYMENT_PROOF_STORED_CHARS) {
+      if (dataUrl.length <= options.maxStoredChars) {
         resolve(dataUrl);
         return;
       }
@@ -153,14 +154,14 @@ const compressPaymentProofToDataUrl = (file: File) => {
         return;
       }
 
-      if (maxDimension > 720) {
-        maxDimension = Math.max(720, Math.floor(maxDimension * 0.75));
-        quality = 0.72;
+      if (maxDimension > options.minMaxDimension) {
+        maxDimension = Math.max(options.minMaxDimension, Math.floor(maxDimension * 0.75));
+        quality = options.normalQuality;
         renderCompressedImage();
         return;
       }
 
-      reject(new Error('Bukti pembayaran tetap terlalu besar setelah dikompres. Coba crop bagian bukti transfer saja.'));
+      reject(new Error(options.tooLargeMessage));
     };
 
     image.onload = () => {
@@ -176,6 +177,24 @@ const compressPaymentProofToDataUrl = (file: File) => {
     image.src = objectUrl;
   });
 };
+
+const compressPaymentProofToDataUrl = (file: File) => compressImageToDataUrl(file, {
+  maxStoredChars: MAX_PAYMENT_PROOF_STORED_CHARS,
+  initialMaxDimension: 1600,
+  minMaxDimension: 720,
+  largeFileQuality: 0.72,
+  normalQuality: 0.82,
+  tooLargeMessage: 'Bukti pembayaran tetap terlalu besar setelah dikompres. Coba crop bagian bukti transfer saja.',
+});
+
+const compressProductImageToDataUrl = (file: File) => compressImageToDataUrl(file, {
+  maxStoredChars: MAX_PRODUCT_IMAGE_STORED_CHARS,
+  initialMaxDimension: 1200,
+  minMaxDimension: 600,
+  largeFileQuality: 0.7,
+  normalQuality: 0.8,
+  tooLargeMessage: 'Gambar produk tetap terlalu besar setelah dikompres. Coba pakai gambar yang lebih ringan.',
+});
 
 export default function App() {
   const [user, setUser] = useState<User | null>(null);
@@ -198,6 +217,7 @@ export default function App() {
   const [waMessage, setWaMessage] = useState('');
   const [paymentProofFile, setPaymentProofFile] = useState<File | null>(null);
   const [submitStatus, setSubmitStatus] = useState('');
+  const [productImageProcessing, setProductImageProcessing] = useState(false);
   const [selectedOrder, setSelectedOrder] = useState<Order | null>(null);
   const [activeTab, setActiveTab] = useState<'preorder' | 'history' | 'stats' | 'products'>('preorder');
   const [activeAdminTab, setActiveAdminTab] = useState<'orders' | 'stats' | 'products'>('orders');
@@ -231,9 +251,9 @@ export default function App() {
   });
 
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const productImageInputRef = useRef<HTMLInputElement>(null);
   const activeProducts = products.filter(p => p.isActive || isAdmin);
-  const preorderProducts = activeProducts.length > 0 ? activeProducts : [DEFAULT_PRODUCT];
-  const currentProduct = preorderProducts.find(p => p.id === selectedProductId) || preorderProducts[0];
+  const currentProduct = activeProducts.find(p => p.id === selectedProductId) || activeProducts[0];
 
   useEffect(() => {
     const testConnection = async () => {
@@ -299,8 +319,8 @@ export default function App() {
       setProducts(productsData);
       if (productsData.length > 0 && !selectedProductId) {
         setSelectedProductId(productsData[0].id!);
-      } else if (productsData.length === 0 && !selectedProductId) {
-        setSelectedProductId(DEFAULT_PRODUCT.id!);
+      } else if (productsData.length === 0) {
+        setSelectedProductId('');
       }
     });
 
@@ -458,6 +478,28 @@ export default function App() {
     }
   };
 
+  const handleProductImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    if (!file.type.startsWith('image/')) {
+      alert("Gambar produk harus berupa JPG atau PNG.");
+      e.target.value = '';
+      return;
+    }
+
+    setProductImageProcessing(true);
+    try {
+      const imageUrl = await compressProductImageToDataUrl(file);
+      setProductFormData(prev => ({ ...prev, imageUrl }));
+    } catch (error) {
+      alert(error instanceof Error ? error.message : String(error));
+      e.target.value = '';
+    } finally {
+      setProductImageProcessing(false);
+    }
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!user) return;
@@ -470,14 +512,14 @@ export default function App() {
     setSubmitStatus('Mengecek data preorder...');
     try {
       const selectedProduct = currentProduct;
-      if (!selectedProduct) {
-        alert("Produk tidak ditemukan");
+      if (!selectedProduct?.id) {
+        alert("Belum ada produk aktif. Admin perlu menambahkan produk terlebih dahulu.");
         setSubmitting(false);
         return;
       }
 
       // Re-verify stock before submission
-      const productId = selectedProduct.id || DEFAULT_PRODUCT.id!;
+      const productId = selectedProduct.id;
       const stockKey = `${productId}_${formData.size}`;
       const currentUsed = stockUsed[stockKey] || 0;
       const limit = stockLimits[stockKey] || 50; // Default limit
@@ -500,6 +542,8 @@ export default function App() {
         customerName: user.displayName,
         productId,
         productName: selectedProduct.name,
+        unitPrice: selectedProduct.price,
+        totalPrice: selectedProduct.price * formData.quantity,
         ...formData,
         paymentProofUrl,
         status: OrderStatus.PENDING,
@@ -580,12 +624,24 @@ export default function App() {
   const handleSubmitProduct = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!isAdmin) return;
+    if (!productFormData.imageUrl) {
+      alert("Silakan pilih gambar produk terlebih dahulu.");
+      return;
+    }
     setSubmitting(true);
     try {
+      const availableSizes = productFormData.availableSizes.split(',').map(s => s.trim()).filter(Boolean);
+      const availableColors = productFormData.availableColors.split(',').map(c => c.trim()).filter(Boolean);
+      if (!availableSizes.length || !availableColors.length) {
+        alert("Ukuran dan warna produk wajib diisi.");
+        setSubmitting(false);
+        return;
+      }
+
       const data = {
         ...productFormData,
-        availableSizes: productFormData.availableSizes.split(',').map(s => s.trim()),
-        availableColors: productFormData.availableColors.split(',').map(c => c.trim()),
+        availableSizes,
+        availableColors,
         price: Number(productFormData.price),
         createdAt: serverTimestamp()
       };
@@ -606,6 +662,9 @@ export default function App() {
         availableColors: 'Hitam,Putih,Navy,Maroon',
         isActive: true
       });
+      if (productImageInputRef.current) {
+        productImageInputRef.current.value = '';
+      }
     } catch (error) {
       handleFirestoreError(error, OperationType.WRITE, 'products');
     } finally {
@@ -672,15 +731,15 @@ export default function App() {
   };
 
   const getOrderProduct = (order: Order) => {
-    return products.find(p => p.id === order.productId) || (order.productId === DEFAULT_PRODUCT.id ? DEFAULT_PRODUCT : null);
+    return products.find(p => p.id === order.productId) || null;
   };
 
   const getOrderUnitPrice = (order: Order) => {
-    return getOrderProduct(order)?.price || DEFAULT_PRODUCT.price;
+    return order.unitPrice || getOrderProduct(order)?.price || 0;
   };
 
   const getOrderTotal = (order: Order) => {
-    return getOrderUnitPrice(order) * order.quantity;
+    return order.totalPrice || getOrderUnitPrice(order) * order.quantity;
   };
 
   const exportToExcel = () => {
@@ -1074,6 +1133,7 @@ export default function App() {
                   onClick={() => {
                     setIsAddingProduct(true);
                     setEditingProduct(null);
+                    if (productImageInputRef.current) productImageInputRef.current.value = '';
                     setProductFormData({
                       name: '',
                       description: '',
@@ -1091,18 +1151,34 @@ export default function App() {
               </div>
 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                {products.map(product => (
-                  <div key={product.id} className="p-4 rounded-2xl border border-gray-100 bg-gray-50 flex items-center justify-between">
-                    <div>
-                      <h4 className="font-bold text-sm">{product.name}</h4>
+                {products.length === 0 ? (
+                  <div className="col-span-full rounded-2xl border border-dashed border-gray-200 bg-gray-50 p-8 text-center">
+                    <ShoppingBag className="w-8 h-8 text-gray-300 mx-auto mb-3" />
+                    <p className="text-sm font-bold text-gray-500">Belum ada produk.</p>
+                    <p className="text-xs text-gray-400 mt-1">Tambahkan produk agar muncul di pilihan preorder user.</p>
+                  </div>
+                ) : products.map(product => (
+                  <div key={product.id} className="p-4 rounded-2xl border border-gray-100 bg-gray-50 flex items-center justify-between gap-4">
+                    <div className="flex items-center gap-3 min-w-0">
+                      <div className="h-14 w-14 shrink-0 overflow-hidden rounded-xl bg-white border border-gray-100 flex items-center justify-center">
+                        {product.imageUrl ? (
+                          <img src={product.imageUrl} alt={product.name} className="h-full w-full object-cover" />
+                        ) : (
+                          <ShoppingBag className="w-5 h-5 text-gray-300" />
+                        )}
+                      </div>
+                      <div className="min-w-0">
+                      <h4 className="font-bold text-sm truncate">{product.name}</h4>
                       <p className="text-xs text-gray-500">Rp {product.price.toLocaleString()}</p>
                       <p className="text-[10px] text-gray-400 mt-1">{product.isActive ? 'Aktif' : 'Nonaktif'}</p>
+                      </div>
                     </div>
                     <div className="flex gap-2">
                       <button 
                         onClick={() => {
                           setEditingProduct(product);
                           setIsAddingProduct(true);
+                          if (productImageInputRef.current) productImageInputRef.current.value = '';
                           setProductFormData({
                             name: product.name,
                             description: product.description,
@@ -1177,13 +1253,41 @@ export default function App() {
                             onChange={e => setProductFormData({...productFormData, description: e.target.value})}
                           />
                         </div>
-                        <div className="space-y-1">
-                          <label className="text-[10px] font-bold text-gray-400 uppercase">Image URL</label>
-                          <input 
-                            className="w-full bg-gray-50 border border-gray-100 rounded-xl px-4 py-2 text-sm"
-                            value={productFormData.imageUrl}
-                            onChange={e => setProductFormData({...productFormData, imageUrl: e.target.value})}
-                            placeholder="https://example.com/image.jpg"
+                        <div className="space-y-2">
+                          <label className="text-[10px] font-bold text-gray-400 uppercase">Gambar Produk</label>
+                          <div
+                            onClick={() => productImageInputRef.current?.click()}
+                            className={`min-h-[140px] cursor-pointer rounded-2xl border-2 border-dashed p-4 transition-all flex items-center justify-center overflow-hidden ${
+                              productFormData.imageUrl ? 'border-green-200 bg-green-50' : 'border-gray-200 bg-gray-50 hover:bg-gray-100'
+                            }`}
+                          >
+                            {productImageProcessing ? (
+                              <div className="flex flex-col items-center gap-2 text-blue-600">
+                                <Loader2 className="w-7 h-7 animate-spin" />
+                                <span className="text-xs font-bold">Mengompres gambar...</span>
+                              </div>
+                            ) : productFormData.imageUrl ? (
+                              <div className="w-full">
+                                <img
+                                  src={productFormData.imageUrl}
+                                  alt="Preview produk"
+                                  className="mx-auto h-36 w-full max-w-xs rounded-xl object-cover"
+                                />
+                                <p className="mt-2 text-center text-[10px] font-bold text-green-600">Klik untuk ganti gambar</p>
+                              </div>
+                            ) : (
+                              <div className="flex flex-col items-center gap-2 text-gray-400">
+                                <Upload className="w-8 h-8" />
+                                <span className="text-xs font-bold">Pilih file gambar produk</span>
+                              </div>
+                            )}
+                          </div>
+                          <input
+                            ref={productImageInputRef}
+                            type="file"
+                            hidden
+                            accept="image/*"
+                            onChange={handleProductImageUpload}
                           />
                         </div>
                         <div className="grid grid-cols-2 gap-4">
@@ -1215,14 +1319,17 @@ export default function App() {
                         <div className="flex gap-3 pt-4">
                           <button 
                             type="button"
-                            onClick={() => setIsAddingProduct(false)}
+                            onClick={() => {
+                              setIsAddingProduct(false);
+                              if (productImageInputRef.current) productImageInputRef.current.value = '';
+                            }}
                             className="flex-1 px-4 py-3 border border-gray-200 rounded-2xl text-sm font-bold text-gray-500 hover:bg-gray-50 transition-colors"
                           >
                             Batal
                           </button>
                           <button 
                             type="submit"
-                            disabled={submitting}
+                            disabled={submitting || productImageProcessing}
                             className="flex-1 px-4 py-3 bg-blue-600 text-white rounded-2xl text-sm font-bold hover:bg-blue-700 transition-colors flex items-center justify-center gap-2"
                           >
                             {submitting && <Loader2 className="w-4 h-4 animate-spin" />}
@@ -1458,12 +1565,38 @@ export default function App() {
                         className="w-full bg-gray-50 border border-gray-100 rounded-xl px-4 py-3 focus:ring-2 focus:ring-blue-600 focus:bg-white outline-none transition-all appearance-none"
                         value={currentProduct?.id || ''}
                         onChange={e => setSelectedProductId(e.target.value)}
+                        disabled={!activeProducts.length}
                       >
-                        {preorderProducts.map(product => (
-                          <option key={product.id} value={product.id}>{product.name} (Rp {product.price.toLocaleString()})</option>
-                        ))}
+                        {activeProducts.length ? (
+                          activeProducts.map(product => (
+                            <option key={product.id} value={product.id}>{product.name} (Rp {product.price.toLocaleString()})</option>
+                          ))
+                        ) : (
+                          <option value="">Belum ada produk aktif</option>
+                        )}
                       </select>
                     </div>
+
+                    {currentProduct ? (
+                      <div className="rounded-2xl border border-gray-100 bg-gray-50 p-4 flex gap-4">
+                        {currentProduct.imageUrl ? (
+                          <img src={currentProduct.imageUrl} alt={currentProduct.name} className="h-24 w-24 rounded-xl object-cover bg-white" />
+                        ) : (
+                          <div className="h-24 w-24 rounded-xl bg-white flex items-center justify-center">
+                            <ShoppingBag className="w-8 h-8 text-gray-300" />
+                          </div>
+                        )}
+                        <div className="min-w-0">
+                          <h4 className="font-black text-gray-900 leading-tight">{currentProduct.name}</h4>
+                          <p className="text-sm font-bold text-blue-600 mt-1">Rp {currentProduct.price.toLocaleString()}</p>
+                          <p className="text-xs text-gray-500 mt-2 line-clamp-3">{currentProduct.description}</p>
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="rounded-2xl border border-amber-100 bg-amber-50 p-4 text-sm font-medium text-amber-800">
+                        Belum ada produk aktif. Silakan tunggu admin menambahkan produk terlebih dahulu.
+                      </div>
+                    )}
 
                     <div className="space-y-1">
                       <label className="text-xs font-bold text-gray-500 uppercase tracking-wider ml-1">Nama Lengkap</label>
@@ -1514,8 +1647,8 @@ export default function App() {
                             value={formData.size}
                             onChange={e => setFormData({ ...formData, size: e.target.value })}
                           >
-                            {(currentProduct?.availableSizes || DEFAULT_PRODUCT.availableSizes).map(s => {
-                              const stockKey = `${currentProduct?.id || DEFAULT_PRODUCT.id}_${s}`;
+                            {(currentProduct?.availableSizes || DEFAULT_SIZES).map(s => {
+                              const stockKey = `${currentProduct?.id || 'no-product'}_${s}`;
                               const used = stockUsed[stockKey] || 0;
                               const limit = stockLimits[stockKey] || 50;
                               const isSoldOut = used >= limit;
@@ -1534,7 +1667,7 @@ export default function App() {
                           value={formData.color}
                           onChange={e => setFormData({ ...formData, color: e.target.value })}
                         >
-                          {(currentProduct?.availableColors || DEFAULT_PRODUCT.availableColors).map(c => (
+                          {(currentProduct?.availableColors || DEFAULT_COLORS).map(c => (
                             <option key={c} value={c}>{c}</option>
                           ))}
                         </select>
@@ -1584,7 +1717,7 @@ export default function App() {
                     </div>
 
                     <button 
-                      disabled={submitting}
+                      disabled={submitting || !currentProduct}
                       className="w-full bg-blue-600 hover:bg-blue-700 disabled:bg-blue-300 text-white font-bold py-4 rounded-2xl transition-all shadow-lg shadow-blue-100 mt-4 flex items-center justify-center gap-2"
                     >
                       {submitting ? (
@@ -1886,7 +2019,7 @@ export default function App() {
                       <Shirt className="w-8 h-8 text-blue-600" />
                     </div>
                     <div>
-                      <p className="font-bold text-lg">{selectedOrder.productName || 'Kaos KOMITS 2025'}</p>
+                      <p className="font-bold text-lg">{selectedOrder.productName || getOrderProduct(selectedOrder)?.name || 'Produk'}</p>
                       <p className="text-sm text-gray-500">{selectedOrder.size} • {selectedOrder.color} • {selectedOrder.quantity} pcs</p>
                       <p className="text-sm font-bold text-blue-600 mt-1">Total: Rp {getOrderTotal(selectedOrder).toLocaleString()}</p>
                     </div>

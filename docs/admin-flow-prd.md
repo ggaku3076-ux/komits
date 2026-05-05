@@ -31,12 +31,12 @@ Membuat alur preorder yang jelas: klien mengirim data dan bukti pembayaran, data
 ## Statistik Admin
 - Total pendapatan dihitung dari order non-`pending`.
 - Pendapatan per order = harga produk x jumlah.
-- Jika produk belum ada di Firestore, sistem memakai fallback produk `Kaos KOMITS 2025`.
+- Jika belum ada produk aktif, klien tidak bisa memilih produk sampai admin menambahkan produk.
 - Statistik menampilkan jumlah pending, verified/completed, status order, dan popularitas warna.
 
 ## Manajemen Produk
 - Admin bisa menambah/mengubah/menghapus produk.
-- Produk memiliki nama, deskripsi, harga, gambar, ukuran, warna, dan status aktif.
+- Produk memiliki nama, deskripsi, harga, gambar dari upload file, ukuran, warna, dan status aktif.
 - Harga produk digunakan untuk perhitungan pendapatan.
 
 ## Kriteria Sukses
