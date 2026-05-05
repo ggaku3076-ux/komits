@@ -184,6 +184,15 @@ export default function App() {
     return `WhatsApp selesai: ${delivered} ${mode}, ${summary.skipped || 0} dilewati, ${summary.failed || 0} gagal.${detail}${request}`;
   };
 
+  const readApiResponse = async (response: Response) => {
+    const text = await response.text();
+    try {
+      return JSON.parse(text);
+    } catch {
+      throw new Error(`API tidak mengembalikan JSON. Status ${response.status}. Pastikan endpoint Vercel /api sudah terdeploy.`);
+    }
+  };
+
   const handleSendOrderWhatsApp = async (order: Order) => {
     if (!isAdmin) return;
     setWaSending(true);
@@ -202,7 +211,7 @@ export default function App() {
           status: order.status,
         }),
       });
-      const result = await response.json();
+      const result = await readApiResponse(response);
       if (!response.ok) throw new Error(result.error || 'WhatsApp gagal dikirim');
       setWaMessage(getWhatsAppResultMessage({
         sent: result.status === 'sent' ? 1 : 0,
@@ -245,7 +254,7 @@ export default function App() {
           })),
         }),
       });
-      const result = await response.json();
+      const result = await readApiResponse(response);
       if (!response.ok) throw new Error(result.error || 'Broadcast WhatsApp gagal');
       setWaMessage(getWhatsAppResultMessage(result));
     } catch (error) {
