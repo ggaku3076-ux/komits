@@ -1379,7 +1379,7 @@ export default function App() {
                         <p className="text-xs font-medium text-gray-400 mt-1">Lengkapi data produk, scroll untuk melihat semua field.</p>
                       </div>
                       <form onSubmit={handleSubmitProduct} className="min-h-0 flex-1 overflow-y-auto px-6 py-5 space-y-4 custom-scrollbar">
-                        <div className="grid grid-cols-2 gap-4">
+                        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                           <div className="space-y-1">
                             <label className="text-[10px] font-bold text-gray-400 uppercase">Nama Produk</label>
                             <input 
@@ -1394,9 +1394,13 @@ export default function App() {
                             <input 
                               required
                               type="number"
-                              className="w-full bg-gray-50 border border-gray-100 rounded-xl px-4 py-2 text-sm"
-                              value={productFormData.price}
-                              onChange={e => setProductFormData({...productFormData, price: parseInt(e.target.value) || 0})}
+                              min="1"
+                              inputMode="numeric"
+                              className="w-full bg-gray-50 border border-gray-100 rounded-xl px-4 py-3 text-base sm:py-2 sm:text-sm"
+                              placeholder="Contoh: 100000"
+                              value={productFormData.price || ''}
+                              onFocus={e => e.currentTarget.select()}
+                              onChange={e => setProductFormData({...productFormData, price: e.target.value === '' ? 0 : parseInt(e.target.value, 10) || 0})}
                             />
                           </div>
                         </div>
