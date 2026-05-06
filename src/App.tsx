@@ -57,7 +57,12 @@ import {
   TrendingUp,
   AlertTriangle,
   Moon,
-  Sun
+  Sun,
+  ShoppingCart,
+  ArrowLeft,
+  PackageOpen,
+  Tag,
+  CreditCard
 } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import { jsPDF } from 'jspdf';
@@ -242,7 +247,7 @@ export default function App() {
   const [productMessage, setProductMessage] = useState('');
   const [productImageProcessing, setProductImageProcessing] = useState(false);
   const [selectedOrder, setSelectedOrder] = useState<Order | null>(null);
-  const [activeTab, setActiveTab] = useState<'preorder' | 'history' | 'stats' | 'products'>('preorder');
+  const [activeTab, setActiveTab] = useState<'preorder' | 'checkout' | 'history' | 'stats' | 'products'>('preorder');
   const [activeAdminTab, setActiveAdminTab] = useState<'orders' | 'stats' | 'products'>('orders');
 
   // Product Form State
@@ -277,7 +282,7 @@ export default function App() {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const productImageInputRef = useRef<HTMLInputElement>(null);
   const activeProducts = products.filter(p => p.isActive || isAdmin);
-  const currentProduct = activeProducts.find(p => p.id === selectedProductId) || activeProducts[0];
+  const currentProduct = activeProducts.find(p => p.id === selectedProductId) || null;
   const isDarkMode = themeMode === 'dark';
 
   useEffect(() => {
@@ -287,6 +292,48 @@ export default function App() {
 
   const toggleTheme = () => {
     setThemeMode(prev => prev === 'dark' ? 'light' : 'dark');
+  };
+
+  const getProductStockSummary = (product: Product) => {
+    const sizes = product.availableSizes?.length ? product.availableSizes : DEFAULT_SIZES;
+    const totalRemaining = sizes.reduce((total, size) => {
+      const stockKey = `${product.id}_${size}`;
+      const used = stockUsed[stockKey] || 0;
+      const limit = stockLimits[stockKey] || 50;
+      return total + Math.max(0, limit - used);
+    }, 0);
+
+    return {
+      totalRemaining,
+      isSoldOut: totalRemaining <= 0
+    };
+  };
+
+  const handleChooseProduct = (product: Product) => {
+    if (!product.id) return;
+    const sizes = product.availableSizes?.length ? product.availableSizes : DEFAULT_SIZES;
+    const colors = product.availableColors?.length ? product.availableColors : DEFAULT_COLORS;
+
+    setSelectedProductId(product.id);
+    setFormData(prev => ({
+      ...prev,
+      size: sizes[0] as Order['size'],
+      color: colors[0],
+      quantity: 1
+    }));
+    setSuccess(false);
+    setSubmitMessage('');
+    setActiveTab('checkout');
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  };
+
+  const handleOpenCart = () => {
+    if (currentProduct) {
+      setActiveTab('checkout');
+    } else {
+      setActiveTab('preorder');
+    }
+    window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
   useEffect(() => {
@@ -367,11 +414,10 @@ export default function App() {
         ...doc.data()
       })) as Product[];
       setProducts(productsData);
-      if (productsData.length > 0 && !selectedProductId) {
-        setSelectedProductId(productsData[0].id!);
-      } else if (productsData.length === 0) {
-        setSelectedProductId('');
-      }
+      setSelectedProductId(prev => {
+        if (!prev) return prev;
+        return productsData.some(product => product.id === prev) ? prev : '';
+      });
     });
 
     return () => {
@@ -990,9 +1036,10 @@ export default function App() {
     boxShadow: isDarkMode ? '0 20px 25px -5px rgba(0,0,0,0.45)' : '0 20px 25px -5px rgba(0,0,0,0.1)',
     padding: '12px'
   };
-  const showPreorderForm = Boolean(user && !isAdmin && activeTab === 'preorder');
+  const showProductCatalog = Boolean(user && !isAdmin && activeTab === 'preorder');
+  const showCheckoutForm = Boolean(user && !isAdmin && activeTab === 'checkout');
   const showOrdersDashboard = Boolean(user && (activeTab === 'history' || (isAdmin && activeTab === 'preorder')));
-  const showHeroBanner = !user || showPreorderForm;
+  const showHeroBanner = !user || showProductCatalog;
 
   if (loading) {
     return (
@@ -1025,6 +1072,25 @@ export default function App() {
             </button>
             {user ? (
               <div className="flex items-center gap-3">
+                {!isAdmin && (
+                  <button
+                    onClick={handleOpenCart}
+                    className={`relative h-10 w-10 rounded-full border transition-colors flex items-center justify-center ${
+                      activeTab === 'checkout'
+                        ? 'border-blue-200 bg-blue-50 text-blue-600'
+                        : 'border-gray-200 bg-white text-gray-600 hover:bg-gray-50'
+                    }`}
+                    title="Keranjang"
+                    aria-label="Buka keranjang"
+                  >
+                    <ShoppingCart className="w-4 h-4" />
+                    {currentProduct && (
+                      <span className="absolute -right-1 -top-1 flex h-5 min-w-5 items-center justify-center rounded-full bg-red-600 px-1 text-[10px] font-black text-white">
+                        1
+                      </span>
+                    )}
+                  </button>
+                )}
                 <div className="hidden sm:block text-right">
                   <p className="text-xs font-medium text-gray-500">
                     Welcome {isAdmin && <span className="bg-red-100 text-red-600 px-1.5 py-0.5 rounded text-[10px] ml-1 uppercase font-bold">Admin</span>}
@@ -1086,8 +1152,15 @@ export default function App() {
                     onClick={() => setActiveTab('preorder')}
                     className={`flex items-center gap-2 px-6 py-3 rounded-2xl text-[13px] font-black transition-all active:scale-95 ${activeTab === 'preorder' ? 'bg-white text-blue-600 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}
                   >
-                    <Shirt className="w-4 h-4" />
-                    PREORDER BARU
+                    <ShoppingBag className="w-4 h-4" />
+                    PILIH PRODUK
+                  </button>
+                  <button 
+                    onClick={handleOpenCart}
+                    className={`flex items-center gap-2 px-6 py-3 rounded-2xl text-[13px] font-black transition-all active:scale-95 ${activeTab === 'checkout' ? 'bg-white text-blue-600 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}
+                  >
+                    <ShoppingCart className="w-4 h-4" />
+                    CHECKOUT
                   </button>
                   <button 
                     onClick={() => setActiveTab('history')}
@@ -1713,7 +1786,128 @@ export default function App() {
             </button>
           </div>
         </div>
-        ) : showPreorderForm ? (
+        ) : showProductCatalog ? (
+          <motion.section
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            className="space-y-6"
+          >
+            <div className="overflow-hidden rounded-[2rem] border border-blue-100 bg-white shadow-sm">
+              <div className="relative overflow-hidden bg-gradient-to-br from-blue-600 via-blue-700 to-slate-950 px-6 py-7 text-white sm:px-8 sm:py-8">
+                <div className="absolute -right-12 -top-16 h-44 w-44 rounded-full bg-white/10" />
+                <div className="absolute bottom-0 right-8 hidden h-24 w-24 rounded-full border border-white/15 sm:block" />
+                <div className="relative z-10 flex flex-col gap-6 sm:flex-row sm:items-end sm:justify-between">
+                  <div>
+                    <p className="mb-2 inline-flex items-center gap-2 rounded-full border border-white/20 bg-white/10 px-3 py-1 text-[10px] font-black uppercase tracking-widest text-blue-50">
+                      <ShoppingBag className="h-3.5 w-3.5" />
+                      KOMITS Store
+                    </p>
+                    <h2 className="max-w-xl text-3xl font-black leading-tight tracking-tight sm:text-4xl">Pilih produk favoritmu</h2>
+                    <p className="mt-3 max-w-lg text-sm font-medium leading-relaxed text-blue-100">Katalog ini langsung mengikuti produk yang ditambahkan admin. Pilih barang, cek varian, lalu lanjut ke checkout.</p>
+                  </div>
+                  <button
+                    onClick={handleOpenCart}
+                    className="inline-flex items-center justify-center gap-2 rounded-2xl bg-white px-5 py-3 text-sm font-black text-blue-700 shadow-lg shadow-blue-950/20 transition-all hover:bg-blue-50 active:scale-95"
+                  >
+                    <ShoppingCart className="w-4 h-4" />
+                    Keranjang {currentProduct ? '(1)' : ''}
+                  </button>
+                </div>
+              </div>
+              <div className="grid grid-cols-3 divide-x divide-gray-100 px-3 py-3 text-center">
+                <div className="px-2 py-2">
+                  <p className="text-lg font-black text-gray-900">{activeProducts.length}</p>
+                  <p className="text-[10px] font-bold uppercase text-gray-400">Produk</p>
+                </div>
+                <div className="px-2 py-2">
+                  <p className="text-lg font-black text-gray-900">{activeProducts.filter(product => !getProductStockSummary(product).isSoldOut).length}</p>
+                  <p className="text-[10px] font-bold uppercase text-gray-400">Ready</p>
+                </div>
+                <div className="px-2 py-2">
+                  <p className="text-lg font-black text-gray-900">{currentProduct ? '1' : '0'}</p>
+                  <p className="text-[10px] font-bold uppercase text-gray-400">Keranjang</p>
+                </div>
+              </div>
+            </div>
+
+            {activeProducts.length === 0 ? (
+              <div className="rounded-[2rem] border border-dashed border-gray-200 bg-white p-10 text-center shadow-sm">
+                <PackageOpen className="mx-auto mb-4 h-10 w-10 text-gray-300" />
+                <h3 className="text-lg font-black text-gray-900">Belum ada produk aktif</h3>
+                <p className="mx-auto mt-2 max-w-sm text-sm font-medium text-gray-500">Produk akan muncul di sini setelah admin menambahkan dan mengaktifkannya.</p>
+              </div>
+            ) : (
+              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+                {activeProducts.map(product => {
+                  const stockSummary = getProductStockSummary(product);
+                  const isSelected = currentProduct?.id === product.id;
+
+                  return (
+                    <motion.article
+                      key={product.id}
+                      layout
+                      whileHover={{ y: -3 }}
+                      className={`group flex min-h-full flex-col overflow-hidden rounded-[1.75rem] border bg-white shadow-sm transition-all ${
+                        isSelected ? 'border-blue-300 ring-4 ring-blue-100' : 'border-gray-200 hover:border-blue-100 hover:shadow-xl hover:shadow-blue-100/50'
+                      }`}
+                    >
+                      <div className="relative aspect-square overflow-hidden bg-gray-50">
+                        {product.imageUrl ? (
+                          <img src={product.imageUrl} alt={product.name} className="h-full w-full object-cover transition-transform duration-300 group-hover:scale-[1.03]" />
+                        ) : (
+                          <div className="flex h-full w-full items-center justify-center">
+                            <ShoppingBag className="h-12 w-12 text-gray-300" />
+                          </div>
+                        )}
+                        <div className="absolute left-3 top-3 rounded-full bg-white/95 px-3 py-1 text-[10px] font-black uppercase text-gray-700 shadow-sm backdrop-blur">
+                          {product.category || 'Lainnya'}
+                        </div>
+                        {isSelected && (
+                          <div className="absolute right-3 top-3 rounded-full bg-blue-600 px-3 py-1 text-[10px] font-black uppercase text-white shadow-sm">
+                            Dipilih
+                          </div>
+                        )}
+                      </div>
+                      <div className="flex flex-1 flex-col p-4">
+                        <div className="mb-3 flex items-start justify-between gap-3">
+                          <div className="min-w-0">
+                            <h3 className="line-clamp-2 text-base font-black leading-tight text-gray-900">{product.name}</h3>
+                          </div>
+                          <span className={`shrink-0 rounded-full px-2.5 py-1 text-[10px] font-black ${
+                            stockSummary.isSoldOut ? 'bg-red-50 text-red-600' : 'bg-green-50 text-green-600'
+                          }`}>
+                            {stockSummary.isSoldOut ? 'Habis' : 'Ready'}
+                          </span>
+                        </div>
+                        <p className="line-clamp-2 min-h-[2.5rem] text-xs font-medium leading-relaxed text-gray-500">{product.description}</p>
+                        <div className="mt-4 rounded-2xl border border-gray-100 bg-gray-50 p-3">
+                          <div className="flex items-end justify-between gap-3">
+                            <div>
+                              <p className="flex items-center gap-1 text-[10px] font-bold uppercase text-gray-400">
+                                <Tag className="h-3 w-3" />
+                                Harga
+                              </p>
+                              <p className="text-lg font-black text-blue-600">Rp {product.price.toLocaleString()}</p>
+                            </div>
+                            <p className="rounded-full bg-white px-2.5 py-1 text-right text-[10px] font-bold text-gray-500">{stockSummary.totalRemaining} stok</p>
+                          </div>
+                        </div>
+                        <button
+                          onClick={() => handleChooseProduct(product)}
+                          disabled={stockSummary.isSoldOut}
+                          className="mt-4 flex w-full items-center justify-center gap-2 rounded-2xl bg-blue-600 px-4 py-3 text-sm font-black text-white shadow-lg shadow-blue-100 transition-all hover:bg-blue-700 active:scale-95 disabled:bg-gray-300 disabled:shadow-none"
+                        >
+                          <ShoppingCart className="w-4 h-4" />
+                          {isSelected ? 'Lanjut Checkout' : 'Pilih Produk'}
+                        </button>
+                      </div>
+                    </motion.article>
+                  );
+                })}
+              </div>
+            )}
+          </motion.section>
+        ) : showCheckoutForm ? (
             <div className="max-w-xl mx-auto">
               {/* Form Section */}
               <motion.section 
@@ -1722,39 +1916,46 @@ export default function App() {
                 className="space-y-6"
               >
                 <div className="bg-white border border-gray-200 rounded-3xl p-6 shadow-sm">
-                  <h3 className="text-lg font-bold mb-6 flex items-center gap-2">
-                    <Shirt className="w-5 h-5 text-blue-600" />
-                    Formulir Preorder
-                  </h3>
-                  <div className="mb-5 rounded-2xl border border-blue-100 bg-blue-50 px-4 py-3 text-sm text-blue-800">
+                  <div className="mb-6 flex items-start justify-between gap-3">
+                    <div>
+                      <h3 className="text-lg font-bold flex items-center gap-2">
+                        <ShoppingCart className="w-5 h-5 text-blue-600" />
+                        Checkout Preorder
+                      </h3>
+                      <p className="mt-1 text-xs font-medium text-gray-400">Lengkapi data diri dan bukti pembayaran untuk produk pilihan.</p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setActiveTab('preorder')}
+                      className="shrink-0 rounded-xl border border-gray-200 bg-white p-2 text-gray-500 transition-colors hover:text-blue-600"
+                      title="Kembali pilih produk"
+                    >
+                      <ArrowLeft className="h-4 w-4" />
+                    </button>
+                  </div>
+                  <div className="mb-5 rounded-2xl border border-blue-100 bg-blue-50 px-4 py-3 text-sm font-medium text-blue-800">
                     Setelah dikirim, data tersimpan di database dan langsung tampil di dashboard admin.
                   </div>
 
                   <form onSubmit={handleSubmit} className="space-y-4">
-                    <div className="space-y-1">
-                      <label className="text-xs font-bold text-gray-500 uppercase tracking-wider ml-1">Pilih Produk</label>
-                      <select 
-                        className="w-full bg-gray-50 border border-gray-100 rounded-xl px-4 py-3 focus:ring-2 focus:ring-blue-600 focus:bg-white outline-none transition-all appearance-none"
-                        value={currentProduct?.id || ''}
-                        onChange={e => setSelectedProductId(e.target.value)}
-                        disabled={!activeProducts.length}
-                      >
-                        {activeProducts.length ? (
-                          activeProducts.map(product => (
-                            <option key={product.id} value={product.id}>{product.name} (Rp {product.price.toLocaleString()})</option>
-                          ))
-                        ) : (
-                          <option value="">Belum ada produk aktif</option>
-                        )}
-                      </select>
-                    </div>
-
                     {currentProduct ? (
-                      <div className="rounded-2xl border border-gray-100 bg-gray-50 p-4 flex gap-4">
+                      <div className="overflow-hidden rounded-[1.75rem] border border-gray-100 bg-gray-50">
+                        <div className="bg-white px-4 py-3">
+                        <div className="mb-3 flex items-center justify-between gap-3">
+                          <p className="text-xs font-black uppercase tracking-wider text-gray-400">Produk di Keranjang</p>
+                          <button
+                            type="button"
+                            onClick={() => setActiveTab('preorder')}
+                            className="text-xs font-black text-blue-600 hover:underline"
+                          >
+                            Ganti Produk
+                          </button>
+                        </div>
+                        <div className="flex gap-4">
                         {currentProduct.imageUrl ? (
-                          <img src={currentProduct.imageUrl} alt={currentProduct.name} className="h-24 w-24 rounded-xl object-cover bg-white" />
+                          <img src={currentProduct.imageUrl} alt={currentProduct.name} className="h-24 w-24 rounded-2xl object-cover bg-white" />
                         ) : (
-                          <div className="h-24 w-24 rounded-xl bg-white flex items-center justify-center">
+                          <div className="h-24 w-24 rounded-2xl bg-white flex items-center justify-center">
                             <ShoppingBag className="w-8 h-8 text-gray-300" />
                           </div>
                         )}
@@ -1764,10 +1965,27 @@ export default function App() {
                           <p className="text-[10px] font-black uppercase tracking-wider text-gray-400 mt-1">{currentProduct.category || 'Lainnya'}</p>
                           <p className="text-xs text-gray-500 mt-2 line-clamp-3">{currentProduct.description}</p>
                         </div>
+                        </div>
+                        </div>
+                        <div className="grid grid-cols-3 divide-x divide-gray-100 px-4 py-3">
+                          <div className="pr-3">
+                            <p className="text-[10px] font-bold uppercase text-gray-400">Harga</p>
+                            <p className="text-sm font-black text-gray-900">Rp {currentProduct.price.toLocaleString()}</p>
+                          </div>
+                          <div className="px-3">
+                            <p className="text-[10px] font-bold uppercase text-gray-400">Jumlah</p>
+                            <p className="text-sm font-black text-gray-900">{formData.quantity} pcs</p>
+                          </div>
+                          <div className="pl-3">
+                            <p className="text-[10px] font-bold uppercase text-gray-400">Total</p>
+                            <p className="text-sm font-black text-blue-600">Rp {(currentProduct.price * formData.quantity).toLocaleString()}</p>
+                          </div>
+                        </div>
                       </div>
                     ) : (
                       <div className="rounded-2xl border border-amber-100 bg-amber-50 p-4 text-sm font-medium text-amber-800">
-                        Belum ada produk aktif. Silakan tunggu admin menambahkan produk terlebih dahulu.
+                        Belum ada produk di keranjang. Pilih produk dulu dari katalog.
+                        <button type="button" onClick={() => setActiveTab('preorder')} className="ml-1 font-black underline">Pilih produk</button>
                       </div>
                     )}
 
@@ -1863,7 +2081,7 @@ export default function App() {
                       <label className="text-xs font-bold text-gray-500 uppercase tracking-wider ml-1">Bukti Pembayaran</label>
                       <div 
                         onClick={() => fileInputRef.current?.click()}
-                        className={`border-2 border-dashed rounded-2xl p-4 flex flex-col items-center justify-center gap-2 cursor-pointer transition-all hover:bg-gray-50 ${paymentProofFile || formData.paymentProofUrl ? 'border-green-300 bg-green-50' : 'border-gray-200'}`}
+                        className={`min-h-[120px] border-2 border-dashed rounded-2xl p-4 flex flex-col items-center justify-center gap-2 cursor-pointer transition-all hover:bg-gray-50 ${paymentProofFile || formData.paymentProofUrl ? 'border-green-300 bg-green-50' : 'border-gray-200 bg-gray-50'}`}
                       >
                         {paymentProofFile || formData.paymentProofUrl ? (
                           <>
@@ -1888,6 +2106,29 @@ export default function App() {
                         onChange={handleFileUpload}
                       />
                     </div>
+
+                    {currentProduct && (
+                      <div className="rounded-2xl border border-gray-100 bg-gray-50 p-4">
+                        <div className="mb-3 flex items-center gap-2 text-sm font-black text-gray-900">
+                          <CreditCard className="h-4 w-4 text-blue-600" />
+                          Ringkasan Pembayaran
+                        </div>
+                        <div className="space-y-2 text-sm">
+                          <div className="flex items-center justify-between text-gray-500">
+                            <span>{currentProduct.name}</span>
+                            <span>Rp {currentProduct.price.toLocaleString()}</span>
+                          </div>
+                          <div className="flex items-center justify-between text-gray-500">
+                            <span>Jumlah</span>
+                            <span>{formData.quantity} pcs</span>
+                          </div>
+                          <div className="border-t border-gray-200 pt-3 flex items-center justify-between">
+                            <span className="font-black text-gray-900">Total bayar</span>
+                            <span className="text-lg font-black text-blue-600">Rp {(currentProduct.price * formData.quantity).toLocaleString()}</span>
+                          </div>
+                        </div>
+                      </div>
+                    )}
 
                     <button 
                       disabled={submitting || !currentProduct}
