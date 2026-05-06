@@ -104,7 +104,7 @@ const handleFirestoreError = (error: unknown, operationType: OperationType, path
   return errInfo.error;
 };
 
-const ADMIN_EMAILS = (import.meta.env.VITE_ADMIN_EMAILS || 'rehanalay9@gmail.com,alyraihan07@gmail.com')
+const ADMIN_EMAILS = (import.meta.env.VITE_ADMIN_EMAILS || 'rehanalay9@gmail.com,alyraihan07@gmail.com,ferdy.ap@gmail.com')
   .split(',')
   .map((email) => email.trim().toLowerCase())
   .filter(Boolean);
