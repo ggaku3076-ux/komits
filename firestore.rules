@@ -7,7 +7,7 @@ service cloud.firestore {
     }
 
     function adminEmails() {
-      return ['rehanalay9@gmail.com'];
+      return ['rehanalay9@gmail.com', 'alyraihan07@gmail.com'];
     }
 
     function isAdmin() {
